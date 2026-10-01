@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HUM</title>
+    <link rel="stylesheet" href="./src/ui/style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="overlay" class="overlay">
+      <div class="panel" data-screen="title">
+        <h1>HUM</h1>
+        <p class="blink">click to enter</p>
+        <p class="hint">WASD move · Shift sprint · Mouse look · Esc pause</p>
+      </div>
+      <div class="panel" data-screen="paused">
+        <h2>paused</h2>
+        <p class="blink">click to resume</p>
+        <p class="hint">seed <span id="seed"></span></p>
+      </div>
+      <div class="panel" data-screen="touch">
+        <h2>desktop only</h2>
+        <p>HUM needs a keyboard and mouse.</p>
+      </div>
+    </div>
+
+    <div id="dev-info" class="dev-info" hidden></div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
