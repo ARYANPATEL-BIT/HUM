@@ -4,16 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HUM</title>
+    <meta name="description" content="HUM – a procedural horror game. Escape before time runs out." />
     <link rel="stylesheet" href="./src/ui/style.css" />
   </head>
   <body>
     <div id="app"></div>
 
+    <!-- Title / Paused / Touch overlays -->
     <div id="overlay" class="overlay">
       <div class="panel" data-screen="title">
         <h1>HUM</h1>
         <p class="blink">click to enter</p>
-        <p class="hint">WASD move · Shift sprint · Mouse look · Esc pause</p>
+        <p class="hint">WASD move · Shift sprint · Mouse look · Esc pause · E interact · Tab checklist</p>
       </div>
       <div class="panel" data-screen="paused">
         <h2>paused</h2>
@@ -23,6 +25,72 @@
       <div class="panel" data-screen="touch">
         <h2>desktop only</h2>
         <p>HUM needs a keyboard and mouse.</p>
+      </div>
+    </div>
+
+    <!-- HUD (always visible during play) -->
+    <div id="hud">
+      <div id="hud-timer">0:00</div>
+      <div id="hud-checklist-panel" class="hidden">
+        <h3>Tasks</h3>
+        <ul id="hud-checklist"></ul>
+      </div>
+      <div id="hud-breaker-track" class="hidden">
+        <div id="hud-breaker-bar"></div>
+      </div>
+      <div id="hud-carry" class="hidden">📼 carrying cassette</div>
+    </div>
+
+    <!-- Task overlays (on top of canvas, world keeps running) -->
+    <div id="task-overlay-root" class="hidden">
+      <!-- Radio task -->
+      <div id="radio-overlay" class="task-overlay">
+        <div class="overlay-panel">
+          <h2>RADIO</h2>
+          <div class="radio-static"></div>
+          <div class="radio-dial-wrap">
+            <div class="radio-dial" title="Drag to tune"></div>
+          </div>
+          <div class="radio-freq">88.0 MHz</div>
+          <p class="hint">Drag the dial to find the signal. Esc to leave.</p>
+        </div>
+      </div>
+
+      <!-- Keypad task -->
+      <div id="keypad-overlay" class="task-overlay">
+        <div class="overlay-panel">
+          <h2>KEYPAD</h2>
+          <div class="keypad-display">____</div>
+          <div class="keypad-grid">
+            <button class="keypad-btn" data-digit="1">1</button>
+            <button class="keypad-btn" data-digit="2">2</button>
+            <button class="keypad-btn" data-digit="3">3</button>
+            <button class="keypad-btn" data-digit="4">4</button>
+            <button class="keypad-btn" data-digit="5">5</button>
+            <button class="keypad-btn" data-digit="6">6</button>
+            <button class="keypad-btn" data-digit="7">7</button>
+            <button class="keypad-btn" data-digit="8">8</button>
+            <button class="keypad-btn" data-digit="9">9</button>
+            <button class="keypad-btn keypad-clear" id="keypad-clear-btn">C</button>
+            <button class="keypad-btn" data-digit="0">0</button>
+          </div>
+          <p class="hint">Enter the 4-digit code. Check nearby walls. Esc to leave.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- End screen -->
+    <div id="end-screen" class="hidden">
+      <div class="end-panel">
+        <h1 class="end-result">FAILED</h1>
+        <p class="end-tasks">Tasks: 0/4</p>
+        <p class="end-time">Time left: 0s</p>
+        <p class="end-walked">Distance: 0 m</p>
+        <p class="end-seed">Seed: 0</p>
+        <div class="end-buttons">
+          <button data-restart-same>Retry same seed</button>
+          <button data-restart-new>New seed</button>
+        </div>
       </div>
     </div>
 
