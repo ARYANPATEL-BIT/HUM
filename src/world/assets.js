@@ -11,8 +11,8 @@ export function createAssets(renderer) {
     materials: {
       wall: new THREE.MeshLambertMaterial({ map: tex.wallpaper }),
       floor: new THREE.MeshLambertMaterial({ map: tex.carpet, vertexColors: true }),
-      ceiling: new THREE.MeshLambertMaterial({ map: tex.ceiling }),
-      panel: new THREE.MeshBasicMaterial({ color: 0xffffff }), // per-instance colour
+      ceiling: new THREE.MeshLambertMaterial({ map: tex.ceiling, vertexColors: true }),
+      panel: new THREE.MeshBasicMaterial({ color: 0xffffff }), // per-instance colour; emissive appearance
       chair: new THREE.MeshLambertMaterial({ color: col.chair }),
       water: new THREE.MeshStandardMaterial({
         color: col.water,
@@ -39,13 +39,12 @@ export function panelGeometry() {
 // Office chair from primitives, origin at the floor under the stem. Proportions are model data.
 export function chairGeometry() {
   const parts = [
-    new THREE.BoxGeometry(0.5, 0.08, 0.48).translate(0, 0.47, 0), // seat
-    new THREE.BoxGeometry(0.46, 0.5, 0.06).translate(0, 0.8, -0.22), // backrest
-    new THREE.BoxGeometry(0.04, 0.3, 0.04).translate(0, 0.5, -0.22), // back post
-    new THREE.CylinderGeometry(0.03, 0.03, 0.36, 6).translate(0, 0.26, 0), // gas lift
+    new THREE.BoxGeometry(0.5, 0.08, 0.48).translate(0, 0.47, 0),
+    new THREE.BoxGeometry(0.46, 0.5, 0.06).translate(0, 0.8, -0.22),
+    new THREE.BoxGeometry(0.04, 0.3, 0.04).translate(0, 0.5, -0.22),
+    new THREE.CylinderGeometry(0.03, 0.03, 0.36, 6).translate(0, 0.26, 0),
   ];
   for (let i = 0; i < 5; i++) {
-    // Five-star base: legs radiating every 72 degrees.
     parts.push(new THREE.BoxGeometry(0.3, 0.04, 0.05).translate(0.15, 0.07, 0).rotateY((i * Math.PI * 2) / 5));
   }
   const merged = mergeGeometries(parts);
