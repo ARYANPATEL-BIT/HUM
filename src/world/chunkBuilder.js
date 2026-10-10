@@ -25,12 +25,11 @@ export function buildChunk(data, assets) {
 
   const walls = new GeoBuilder();
   const floor = new GeoBuilder(true);
-  const ceiling = new GeoBuilder();
+  const ceiling = new GeoBuilder(true); // vertex color for baked light
   const colliders = [];
   const water = data.landmark?.water;
 
   const flagAt = (x, z) => (x < 0 || z < 0 || x >= n || z >= n ? 0 : flags[z * n + x]);
-  // Is this box inside the flooded room? Then it also gets a mirrored copy below the water.
   const inWater = (x0, z0, x1, z1) =>
     water && x1 > water.x0 - T && x0 < water.x1 + T && z1 > water.z0 - T && z0 < water.z1 + T;
 
@@ -42,9 +41,6 @@ export function buildChunk(data, assets) {
     }
   }
 
-  // --- walls: merge consecutive edges on a line into one run; this chunk owns lines 0..n-1 ---
-  // A wall is tall if either neighbouring cell is tall. An open edge between a tall and a normal
-  // cell (a doorway into the tall room) gets a header filling the gap above the doorway.
   const sides = (axis, line, i) =>
     axis === 'h' ? [flagAt(i, line - 1), flagAt(i, line)] : [flagAt(line - 1, i), flagAt(line, i)];
   const edgeTall = (axis, line, i) => {
@@ -63,7 +59,7 @@ export function buildChunk(data, assets) {
       while (i < n) {
         const isTall = edgeTall(axis, line, i);
         if (!arr[line * n + i]) {
-          if (needsHeader(axis, line, i)) emitRun(axis, line, i, i + 1, H, tall, false); // doorway header
+          if (needsHeader(axis, line, i)) emitRun(axis, line, i, i + 1, H, tall, false);
           i++;
           continue;
         }
@@ -76,11 +72,10 @@ export function buildChunk(data, assets) {
   }
 
   function emitRun(axis, line, from, to, y0, y1, collide) {
-    // Extend half a thickness past each end so runs meeting at a corner close the gap.
     const a = from * C - T / 2;
     const b = to * C + T / 2;
     const l = line * C;
-    const uOffset = rng() * wallTexW; // random wallpaper phase hides the texture repeat
+    const uOffset = rng() * wallTexW;
     if (axis === 'h') addBox(a, l - T / 2, b, l + T / 2, y0, y1, collide, uOffset);
     else addBox(l - T / 2, a, l + T / 2, b, y0, y1, collide, uOffset);
   }
@@ -90,8 +85,21 @@ export function buildChunk(data, assets) {
     addBox(px * C - ps, pz * C - ps, px * C + ps, pz * C + ps, 0, H, true, rng() * wallTexW);
   }
 
-  // --- floor & ceiling, one quad per cell ---
-  // Carpet tint is hashed per *global* grid vertex, so it blends smoothly across cells and seams.
+  // Baked vertex lighting: approximate a panel-above contribution per vertex.
+  // Each panel contributes a falloff term; ceiling gets more, floor gets base ambient.
+  const L = CONFIG.lighting;
+  const bakedLight = (lx, lz, isFloor) => {
+    let bright = L.bakeAmbient;
+    for (const p of data.panels) {
+      if (p.kind === 'dead') continue;
+      const dist2 = (p.x - lx) ** 2 + (p.z - lz) ** 2;
+      const r = W.panelSpacing * C * 1.5;
+      const falloff = Math.max(0, 1 - dist2 / (r * r));
+      bright += falloff * L.bakeDirY * (isFloor ? 0.6 : 1.0);
+    }
+    return Math.min(1, bright);
+  };
+
   const ft = W.floorTint;
   const floorTint = (lx, lz) => {
     const gx = data.cx * n + Math.round(lx / C);
@@ -99,8 +107,14 @@ export function buildChunk(data, assets) {
     const r = mulberry32(hash(data.seed, TINT_SALT, gx, gz));
     let k = 1 - r() * ft.variation;
     if (r() < ft.dampChance) k *= 1 - ft.dampDarken;
-    return [k, k * 0.98, k * 0.95];
+    const b = bakedLight(lx, lz, true);
+    return [k * b, k * b * 0.98, k * b * 0.95];
   };
+  const ceilTint = (lx, lz) => {
+    const b = bakedLight(lx, lz, false);
+    return [b, b * 0.99, b * 0.97];
+  };
+
   for (let z = 0; z < n; z++) {
     for (let x = 0; x < n; x++) {
       const f = flags[z * n + x];
@@ -109,10 +123,9 @@ export function buildChunk(data, assets) {
       if (!(f & CELL_NO_FLOOR)) {
         floor.hquad(x0, z0, x0 + C, z0 + C, 0, true, tex.carpet.meters, floorTint);
       } else {
-        // Flooded: reflected ceiling below the water surface.
-        ceiling.hquad(x0, z0, x0 + C, z0 + C, -H, true, tex.ceiling.meters);
+        ceiling.hquad(x0, z0, x0 + C, z0 + C, -H, true, tex.ceiling.meters, ceilTint);
       }
-      ceiling.hquad(x0, z0, x0 + C, z0 + C, f & CELL_TALL ? tall : H, false, tex.ceiling.meters);
+      ceiling.hquad(x0, z0, x0 + C, z0 + C, f & CELL_TALL ? tall : H, false, tex.ceiling.meters, ceilTint);
     }
   }
 
@@ -122,7 +135,7 @@ export function buildChunk(data, assets) {
   // --- assemble meshes ---
   const group = new THREE.Group();
   const M = assets.materials;
-  const owned = []; // geometries this chunk must dispose
+  const owned = [];
   const addMesh = (builder, mat) => {
     if (builder.empty) return;
     const geo = builder.build();
@@ -159,7 +172,7 @@ export function buildChunk(data, assets) {
     heightAt: (lx, lz) => chunkHeightAt(data, lx, lz),
     dispose() {
       owned.forEach((g) => g.dispose());
-      panels.dispose(); // frees instance buffers; the shared panel geometry stays
+      panels.dispose();
       chairs?.dispose();
     },
   };
@@ -173,12 +186,10 @@ function buildStairs(s, floor, colliders, texMeters) {
     const z1 = z0 + s.run;
     const y0 = i * s.rise;
     const y1 = y0 + s.rise;
-    floor.hquad(s.x0, z0, s.x1, z1, y1, true, texMeters, tint); // tread
-    // Riser (faces -Z) and the open side (faces +X), UVs in meters like the tread.
+    floor.hquad(s.x0, z0, s.x1, z1, y1, true, texMeters, tint);
     floor.vquad(s.x1, z0, -width, 0, y0, y1, -s.x1 / texMeters, -s.x0 / texMeters, y0 / texMeters, y1 / texMeters, tint);
     floor.vquad(s.x1, z1, 0, -s.run, 0, y1, -z1 / texMeters, -z0 / texMeters, 0, y1 / texMeters, tint);
   }
-  // Block the open side once the steps get too tall to step onto, so the only way up is the front.
   const sideBlock = CONFIG.landmarks.stairs.sideBlockHeight;
   const firstBlocked = Math.ceil(sideBlock / s.rise) - 1;
   const t = CONFIG.world.wallThickness / 2;
@@ -205,10 +216,9 @@ function buildPanels(data, assets, water, tall) {
     _obj.updateMatrix();
     mesh.setMatrixAt(i, _obj.matrix);
     mesh.setColorAt(i++, _col.set(colorOf(p)));
-    p.y = y; // phase 3's light pool reads panel positions from here
+    p.y = y;
   }
   for (const p of mirrored) {
-    // Reflection: same panel mirrored through the floor, flipped to face up.
     _obj.position.set(p.x, -(H - W.panelGap), p.z);
     _obj.rotation.set(Math.PI, 0, 0);
     _obj.updateMatrix();
