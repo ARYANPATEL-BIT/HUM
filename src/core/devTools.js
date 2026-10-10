@@ -1,16 +1,17 @@
 import * as THREE from 'three';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
+import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { CONFIG } from '../config.js';
+import { applyPreset } from './renderer.js';
 
-// Dev builds only (dynamically imported behind import.meta.env.DEV, so it never ships).
-//   `  toggle debug view: chunk grid through walls, fog off, memory readout
-//   G  toggle auto-run: noclip straight ahead at dev.autoRunSpeed (for the 2 km memory test)
+// Dev builds only (dynamically imported behind import.meta.env.DEV).
 export class DevTools {
-  constructor(gfx, player, chunks, input) {
+  constructor(gfx, player, chunks, input, lightPool) {
     this.gfx = gfx;
     this.player = player;
     this.chunks = chunks;
     this.input = input;
+    this.lightPool = lightPool;
     this.info = document.getElementById('dev-info');
     this.info.hidden = false;
     this.stats = new Stats();
@@ -21,10 +22,10 @@ export class DevTools {
     this.grid.visible = false;
     gfx.scene.add(this.grid);
     this.checkFogCoversLoading();
-    window.hum = { gfx, player, chunks }; // poke at the game from the browser console
+    this.buildGui();
+    window.hum = { gfx, player, chunks, lightPool };
   }
 
-  // Chunk boundaries for the loaded 5x5 area, drawn on top of everything.
   makeGrid() {
     const R = CONFIG.world.loadRadius + 1;
     const S = this.chunks.size;
@@ -41,7 +42,6 @@ export class DevTools {
     return grid;
   }
 
-  // The nearest an unloaded chunk can be is loadRadius chunks away; it must be fully fogged there.
   checkFogCoversLoading() {
     const d = CONFIG.world.loadRadius * this.chunks.size;
     const hidden = 1 - Math.exp(-((CONFIG.atmosphere.fogDensity * d) ** 2));
@@ -50,13 +50,57 @@ export class DevTools {
     }
   }
 
-  begin() {
-    this.stats.begin();
+  buildGui() {
+    const gui = new GUI({ title: 'HUM tuning' });
+    this.gui = gui;
+
+    // Preset switcher
+    const presetObj = { preset: CONFIG.preset };
+    gui.add(presetObj, 'preset', ['low', 'medium', 'high']).name('Graphics preset').onChange((v) => {
+      applyPreset(v);
+    });
+
+    // Lighting
+    const L = CONFIG.lighting;
+    const lf = gui.addFolder('Lighting');
+    lf.add(L, 'flickerRate', 0.5, 10, 0.1).name('Flicker rate');
+    lf.add(L, 'flickerDepth', 0, 1, 0.01).name('Flicker depth');
+    lf.add(L, 'intensity', 0, 20, 0.5).name('Pool intensity').onChange((v) => {
+      if (this.lightPool) this.lightPool.lights.forEach((e) => (e.light.intensity = v));
+    });
+
+    // Post
+    const P = CONFIG.post;
+    const pf = gui.addFolder('Post');
+    pf.add(P, 'enabled').name('Post enabled');
+    pf.add(P, 'grainStrength', 0, 0.2, 0.002).name('Grain');
+    pf.add(P, 'vignetteDarkness', 0, 2, 0.05).name('Vignette');
+    pf.add(P, 'caStrength', 0, 0.005, 0.0001).name('Chrom. aberr.');
+
+    // Fog
+    const af = gui.addFolder('Atmosphere');
+    const fogProxy = { density: CONFIG.atmosphere.fogDensity };
+    af.add(fogProxy, 'density', 0, 0.15, 0.001).name('Fog density').onChange((v) => {
+      this.gfx.scene.fog.density = v;
+    });
+
+    // Copy config
+    const copyObj = {
+      copyConfig: () => {
+        const out = JSON.stringify({
+          lighting: { flickerRate: L.flickerRate, flickerDepth: L.flickerDepth },
+          post: { grainStrength: P.grainStrength, vignetteDarkness: P.vignetteDarkness, caStrength: P.caStrength },
+          atmosphere: { fogDensity: fogProxy.density },
+        }, null, 2);
+        navigator.clipboard?.writeText(out).catch(() => console.log(out));
+        console.log('[config copy]', out);
+      }
+    };
+    gui.add(copyObj, 'copyConfig').name('Copy config to clipboard');
   }
 
-  end() {
-    this.stats.end();
-  }
+  begin() { this.stats.begin(); }
+  end() { this.stats.end(); }
 
   update(dt) {
     const input = this.input;
