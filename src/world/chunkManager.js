@@ -16,13 +16,15 @@ export class ChunkManager {
     this.chunks = new Map();
     this.originCX = 0;
     this.originCZ = 0;
-    this.stamp = 0; // collision query dedupe counter
+    this.stamp = 0;
     this.rebaseListeners = [];
-    this.pending = 0; // chunks still waiting to be built (for the debug readout)
+    this.pending = 0;
     this.stats = { built: 0, unloaded: 0 };
+    this.lightPool = null; // set by main.js after LightPool construction
+    this.onChunkLoaded = null; // optional callback(chunk) for task system
+    this.onChunkUnloaded = null; // optional callback(key) for task system
   }
 
-  // Numeric key, exact for |cx| < 2^21 and |cz| < 2^31 (tens of thousands of km).
   key(cx, cz) {
     return cx * 4294967296 + (cz >>> 0);
   }
@@ -31,16 +33,12 @@ export class ChunkManager {
     return this.chunks.get(this.key(cx, cz));
   }
 
-  // Global chunk index containing a scene position.
   chunkAt(x, z) {
     return [Math.floor(x / this.size) + this.originCX, Math.floor(z / this.size) + this.originCZ];
   }
 
-  // Build everything around a position right now (initial load, respawn).
   preload(pos) {
-    while (this.buildNext(pos)) {
-      /* keep going */
-    }
+    while (this.buildNext(pos)) { /* keep going */ }
   }
 
   update(pos) {
@@ -49,7 +47,6 @@ export class ChunkManager {
     for (let i = 0; i < CONFIG.world.maxBuildsPerFrame; i++) if (!this.buildNext(pos)) break;
   }
 
-  // Build the closest missing chunk within loadRadius. Returns false when nothing is missing.
   buildNext(pos) {
     const R = CONFIG.world.loadRadius;
     const [pcx, pcz] = this.chunkAt(pos.x, pos.z);
@@ -77,16 +74,22 @@ export class ChunkManager {
   }
 
   load(cx, cz) {
+    const k = this.key(cx, cz);
+    if (this.chunks.has(k)) return this.chunks.get(k);
     const data = generateChunk(this.seed, cx, cz);
     const built = buildChunk(data, this.assets);
-    const chunk = { cx, cz, data, ...built, ox: 0, oz: 0, cells: null };
+    const chunk = { cx, cz, data, ...built, ox: 0, oz: 0, cells: null, key: k };
     this.place(chunk);
-    this.chunks.set(this.key(cx, cz), chunk);
+    this.chunks.set(k, chunk);
     this.scene.add(chunk.group);
     this.stats.built++;
+    if (this.lightPool) {
+      this.lightPool.addChunk(k, data.panels, chunk.group.position);
+    }
+    if (this.onChunkLoaded) this.onChunkLoaded(chunk);
+    return chunk;
   }
 
-  // Position a chunk's group and its collision boxes in scene space, and bucket the boxes by cell.
   place(chunk) {
     const ox = (chunk.cx - this.originCX) * this.size;
     const oz = (chunk.cz - this.originCZ) * this.size;
@@ -111,7 +114,6 @@ export class ChunkManager {
     const cells = Array.from({ length: n * n }, () => []);
     const clamp = (i) => Math.max(0, Math.min(n - 1, i));
     for (const b of chunk.colliders) {
-      // Bucketing uses chunk-local coords, which don't change when the origin moves.
       const x0 = clamp(Math.floor((b.minX - chunk.ox) / C));
       const x1 = clamp(Math.floor((b.maxX - chunk.ox) / C));
       const z0 = clamp(Math.floor((b.minZ - chunk.oz) / C));
@@ -124,12 +126,13 @@ export class ChunkManager {
   unloadFar(pos) {
     const limit = CONFIG.world.unloadDistance;
     for (const [k, c] of this.chunks) {
-      // Chebyshev distance from the player to the chunk's square footprint.
       const dx = Math.max(c.ox - pos.x, 0, pos.x - (c.ox + this.size));
       const dz = Math.max(c.oz - pos.z, 0, pos.z - (c.oz + this.size));
       if (Math.max(dx, dz) <= limit) continue;
       this.scene.remove(c.group);
       c.dispose();
+      if (this.lightPool) this.lightPool.removeChunk(k);
+      if (this.onChunkUnloaded) this.onChunkUnloaded(k, c);
       this.chunks.delete(k);
       this.stats.unloaded++;
     }
@@ -138,7 +141,6 @@ export class ChunkManager {
   maybeRebase(pos) {
     const limit = CONFIG.world.rebaseDistance;
     if (Math.abs(pos.x) < limit && Math.abs(pos.z) < limit) return;
-    // Shift by whole chunks so chunk-local data never changes.
     const sx = Math.trunc(pos.x / this.size);
     const sz = Math.trunc(pos.z / this.size);
     this.originCX += sx;
@@ -148,6 +150,7 @@ export class ChunkManager {
     for (const c of this.chunks.values()) this.place(c);
     pos.x -= dx;
     pos.z -= dz;
+    if (this.lightPool) this.lightPool.rebase(dx, dz);
     for (const fn of this.rebaseListeners) fn(dx, dz);
   }
 
@@ -155,13 +158,11 @@ export class ChunkManager {
     this.rebaseListeners.push(fn);
   }
 
-  // Collision provider: wall boxes (scene coords) near a circle, deduped.
   query(x, z, r, out) {
     out.length = 0;
     const stamp = ++this.stamp;
     const n = CONFIG.world.chunkCells;
     const C = CONFIG.world.cellSize;
-    // Margin covers seam walls owned by the neighbouring chunk that poke into this one.
     const m = r + CONFIG.world.wallThickness;
     const [cx0, cz0] = this.chunkAt(x - m, z - m);
     const [cx1, cz1] = this.chunkAt(x + m, z + m);
@@ -196,13 +197,31 @@ export class ChunkManager {
     return c ? c.heightAt(x - c.ox, z - c.oz) : 0;
   }
 
+  // Is (wx, wz) behind a wall from (fx, fz)? Simple DDA ray-march through the cell grid.
+  // Returns true if blocked (used by entity LoS and A*).
+  hasLineOfSight(fx, fz, tx, tz) {
+    const C = CONFIG.world.cellSize;
+    let cx = fx, cz = fz;
+    const dx = tx - fx, dz = tz - fz;
+    const steps = Math.ceil(Math.hypot(dx, dz) / (C * 0.5));
+    if (steps === 0) return true;
+    const sx = dx / steps, sz = dz / steps;
+    for (let i = 1; i <= steps; i++) {
+      cx += sx; cz += sz;
+      const boxes = this.query(cx, cz, 0.15, []);
+      for (const b of boxes) {
+        if (cx > b.minX && cx < b.maxX && cz > b.minZ && cz < b.maxZ) return false;
+      }
+    }
+    return true;
+  }
+
   // Centre of the spawn cell in chunk (0, 0), facing an open side.
   spawnPoint() {
     const [sx, sz] = CONFIG.world.spawnCell;
     const C = CONFIG.world.cellSize;
     const c = this.get(0, 0) || (this.load(0, 0), this.get(0, 0));
     const { h, v, n } = c.data;
-    // yaw 0 faces -Z (north); -PI/2 faces +X (east).
     const options = [
       [h[sz * n + sx], 0],
       [v[(sx + 1) * n + sz], -Math.PI / 2],
