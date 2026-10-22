@@ -17,10 +17,9 @@ import { TaskManager } from './tasks/taskManager.js';
 import { Entity } from './entity/entity.js';
 import { noiseEvents } from './entity/noiseEvents.js';
 import { initAudio, isReady } from './audio/audio.js';
-import { initHum, updateHumPanners, updateListener } from './audio/hum.js';
+import { initHum, updateHumPanners, updateListener, setHumPitch, triggerCrackle, rebaseHumPanners } from './audio/hum.js';
 import { updateFootsteps } from './audio/footsteps.js';
 import { updateTaskAudio, rebaseTaskAudio } from './audio/tasks.js';
-import { isCarryingCassette } from './tasks/cassette.js';
 
 const menus = new Menus(document.getElementById('overlay'));
 
@@ -42,18 +41,43 @@ function boot() {
   const assets = createAssets(gfx.renderer);
   const chunks = new ChunkManager(gfx.scene, seed, assets);
   const lightPool = new LightPool(gfx.scene);
+  lightPool.onFlicker = triggerCrackle;
   chunks.lightPool = lightPool;
 
   const collision = new CollisionWorld(chunks);
   const player = new PlayerController(gfx.camera, input, collision, (x, z) => chunks.groundAt(x, z));
 
   // Task system.
-  const taskObjects = new TaskObjects(seed, chunks.size);
-  chunks.onChunkLoaded = (chunk) => taskObjects.placeChunk(chunk);
+  const taskObjects = new TaskObjects(seed, chunks.size, assets);
+  chunks.onChunkLoaded = (chunk) => taskObjects.placeChunk(chunk, player.position);
   chunks.onChunkUnloaded = (key, chunk) => taskObjects.unplaceChunk(key, chunk);
 
-  const taskManager = new TaskManager(gfx.scene, chunks, taskObjects, seed, gfx);
+  const taskManager = new TaskManager(gfx.scene, chunks, taskObjects, seed, player);
   taskManager.lightPool = lightPool;
+
+  // Difficulty picker (title screen). The click then bubbles to the overlay and starts the game.
+  document.querySelectorAll('[data-difficulty]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      CONFIG.game.timer = CONFIG.game.timers[btn.dataset.difficulty];
+      if (btn.dataset.difficulty === 'hard') CONFIG.entity.spawnDelay = 0;
+      taskManager.timeLeft = CONFIG.game.timer;
+    });
+  });
+
+  // Task overlays release pointer lock. The close button re-locks inside its click handler;
+  // finishing a task re-locks right after the click that finished it.
+  document.querySelectorAll('[data-close-overlay]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      taskManager.closeOverlay();
+      input.requestLock();
+    });
+  });
+  document.addEventListener('task-complete', () => {
+    if (game.is('playing') && !input.locked) input.requestLock();
+  });
+  input.onLockFail = () => {
+    if (game.is('playing') && !input.locked && !taskManager.overlayOpen) game.set('paused');
+  };
 
   const hud = new HUD();
   hud.refreshChecklist();
@@ -70,10 +94,11 @@ function boot() {
 
   // Rebase listeners.
   chunks.onRebase((dx, dz) => {
-    player.position.x -= 0; // already handled by ChunkManager.maybeRebase
     taskObjects.rebase(dx, dz);
+    taskManager.rebase(dx, dz);
     entity.rebase(dx, dz);
-    rebaseTaskAudio(dx, dz, taskObjects.active);
+    rebaseTaskAudio(dx, dz);
+    rebaseHumPanners(lightPool.lights); // LightPool.rebase already moved the lights
   });
 
   chunks.preload({ x: 0, z: 0 });
@@ -83,7 +108,7 @@ function boot() {
   let dev = null;
   if (import.meta.env.DEV) {
     import('./core/devTools.js').then(({ DevTools }) => {
-      dev = new DevTools(gfx, player, chunks, input, lightPool);
+      dev = new DevTools(gfx, player, chunks, input, lightPool, entity);
       // Extend dev update for entity / task dev keys.
       const baseUpdate = dev.update.bind(dev);
       dev.update = (dt) => {
@@ -96,7 +121,7 @@ function boot() {
         // F4: teleport to nearest task.
         if (input.wasPressed('F4')) {
           const t = taskManager.devNearestTask(player.position);
-          if (t) { player.position.x = t.x; player.position.z = t.z; }
+          if (t) { player.position.x = t.wx; player.position.z = t.wz; }
         }
         // F5: toggle entity.
         if (input.wasPressed('F5')) {
@@ -111,6 +136,7 @@ function boot() {
   // Win/lose events.
   document.addEventListener('game-end', (e) => {
     game.set('end');
+    document.exitPointerLock(); // free the cursor for the end-screen buttons
     showEndScreen(
       { ...e.detail, tasks: taskManager.completedTypes.size },
       seed,
@@ -141,12 +167,19 @@ function boot() {
       update: (dt) => {
         const p = pressure();
 
-        // Cassette blocks sprint.
-        player.canSprint = !isCarryingCassette();
+        // Esc inside a task overlay (pointer already unlocked): close it and pause.
+        if (taskManager.overlayOpen && input.wasPressed('Escape')) {
+          taskManager.closeOverlay();
+          game.set('paused');
+          return;
+        }
 
-        player.update(dt);
+        // Cassette blocks sprint.
+        player.canSprint = !taskManager.carrying;
+
+        if (!taskManager.overlayOpen) player.update(dt);
         chunks.update(player.position);
-        lightPool.update(dt, gfx.camera);
+        lightPool.update(dt, gfx.camera, p); // pressure: shorter flicker gaps, more dead panels
 
         // Noise events from sprinting.
         if (player.sprinting && player.speed > 2) {
@@ -164,8 +197,8 @@ function boot() {
           const delay = CONFIG.entity.spawnDelay;
           if (entitySpawnTimer >= delay) {
             entity.spawned = true;
-            // Spawn far from player, outside camera view.
-            const angle = player.yaw + Math.PI + (Math.random() - 0.5) * Math.PI;
+            // Spawn far from player, behind the camera ((sin yaw, cos yaw) points backwards).
+            const angle = player.yaw + (Math.random() - 0.5) * Math.PI;
             const dist = CONFIG.entity.spawnMinDist + 5;
             entity.spawn(
               player.position.x + Math.sin(angle) * dist,
@@ -175,11 +208,10 @@ function boot() {
         }
 
         if (entity.enabled) {
-          entity.update(dt, player.position, gfx.camera, p, lightPool, noiseEvents);
+          entity.update(dt, player.position, gfx.camera, p, noiseEvents);
+        } else {
+          noiseEvents.flush(); // nobody is listening; don't let events pile up
         }
-
-        // Pressure: scale flicker and hum pitch.
-        CONFIG.lighting.flickerIntensityBase = 1 + p * (CONFIG.entity.rampFlickerMax - 1);
 
         // Red vignette: entity within 10m while overlay open.
         if (taskManager.overlayOpen && entity.enabled) {
@@ -190,11 +222,8 @@ function boot() {
           gfx.post.setRedVignette(0);
         }
 
-        // Hum pitch in last 60s.
-        if (taskManager.timeLeft < 60) {
-          const { setHumPitch } = require('./audio/hum.js');
-          // Dynamic import already done; use a flag.
-        }
+        // Hum pitch rises over the last 60 s.
+        setHumPitch(Math.max(0, 1 - taskManager.timeLeft / 60) * CONFIG.entity.rampHumPitchHz);
 
         // Audio update.
         if (isReady()) {
@@ -220,7 +249,7 @@ function boot() {
   });
   input.onLockChange = (locked) => {
     if (locked) game.set('playing');
-    else if (game.is('playing')) game.set('paused');
+    else if (game.is('playing') && !taskManager.overlayOpen) game.set('paused');
   };
 
   new GameLoop((dt, elapsed) => {

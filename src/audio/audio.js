@@ -56,11 +56,3 @@ export function setMuffle(active) {
     muffle = null;
   }
 }
-
-// Convenience: create a gain node connected to a bus.
-export function gainOn(busName, value = 1) {
-  const g = ctx.createGain();
-  g.gain.value = value;
-  g.connect(buses[busName]);
-  return g;
-}

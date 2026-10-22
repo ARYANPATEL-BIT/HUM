@@ -86,11 +86,11 @@ export function createComposer(renderer, scene, camera) {
     pass,
     tick(dt) {
       pass.uniforms.time.value += dt * 60; // grain shifts every frame
+      applyPostConfig(pass.uniforms); // live: dev panel and presets edit CONFIG.post
     },
     setRedVignette(v) {
       pass.uniforms.redVignette.value = v;
     },
-    enabled: CONFIG.post.enabled,
   };
 }
 

@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
+import { CollisionWorld } from '../player/collision.js';
 import { playEntityFootstep, updateEntityAudio, initEntityAudio, rebaseEntityAudio } from '../audio/entity.js';
 
 // Entity: tall thin figure from primitives with vertex-jitter shader.
 // State machine: wander → investigate → chase → lose → wander.
-// A* pathfinding (capped at 4000 node expansions, 2 Hz recompute).
-// LoS: DDA through grid cells (not three's Raycaster).
+// In every state it moves along an A* path over grid cells (capped at pathMaxExpansions,
+// recomputed at pathRecomputeHz) and collides with walls like the player.
+// LoS: ray-march through the collider grid (ChunkManager.hasLineOfSight).
 
 const JITTER_VERT = /* glsl */`
   uniform float time;
@@ -28,11 +30,14 @@ const JITTER_FRAG = /* glsl */`
 `;
 
 const STATES = { WANDER: 'wander', INVESTIGATE: 'investigate', CHASE: 'chase', LOSE: 'lose' };
+const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 export class Entity {
   constructor(scene, chunks) {
     this.scene = scene;
     this.chunks = chunks;
+    this.collision = new CollisionWorld(chunks);
+    this.near = [];
     this.position = new THREE.Vector3();
     this.state = STATES.WANDER;
     this.enabled = false;
@@ -54,19 +59,13 @@ export class Entity {
     // Navigation
     this.path = [];
     this.pathTimer = 0;
-    this.pathRecomputeInterval = 1 / CONFIG.entity.pathRecomputeHz;
     this.target = null;
     this.noiseTarget = null;
     this.loseTimer = 0;
     this.gracePeriod = 0;
     this.footstepTimer = 0;
-    this.spawnTimer = 0;
     this.spawned = false;
     this.elapsed = 0;
-
-    // Path debug (dev).
-    this.pathLine = null;
-    this.stateLabelEl = null;
   }
 
   _buildMesh() {
@@ -82,9 +81,6 @@ export class Entity {
       new THREE.BoxGeometry(0.12, 0.85, 0.14).translate(-0.1, 0.45, 0),
       new THREE.BoxGeometry(0.12, 0.85, 0.14).translate(0.1, 0.45, 0),
     ];
-    const { mergeGeometries } = THREE;
-    // three r165+ has mergeGeometries on BufferGeometryUtils, not THREE directly.
-    // Build manually.
     const group = new THREE.Group();
     for (const geo of parts) {
       group.add(new THREE.Mesh(geo, this.material));
@@ -92,13 +88,25 @@ export class Entity {
     return group;
   }
 
+  // Put the entity at the centre of the cell containing (x, z) and drop its path.
+  _placeAt(x, z) {
+    const C = CONFIG.world.cellSize;
+    this.position.set((Math.floor(x / C) + 0.5) * C, 0, (Math.floor(z / C) + 0.5) * C);
+    this.path = [];
+    this.pathTimer = 0;
+  }
+
   spawn(x, z) {
-    this.position.set(x, 0, z);
-    this.mesh.position.set(x, 0, z);
+    this._placeAt(x, z);
     this.mesh.visible = true;
     this.enabled = true;
     this.state = STATES.WANDER;
     initEntityAudio();
+  }
+
+  enable() {
+    this.enabled = true;
+    this.mesh.visible = true;
   }
 
   disable() {
@@ -106,7 +114,7 @@ export class Entity {
     this.mesh.visible = false;
   }
 
-  update(dt, playerPos, playerCamera, pressure, lightPool, noiseEvents) {
+  update(dt, playerPos, playerCamera, pressure, noiseEvents) {
     if (!this.enabled) return;
     this.elapsed += dt;
     this.material.uniforms.time.value = this.elapsed;
@@ -115,7 +123,7 @@ export class Entity {
     this.material.uniforms.jitterAmt.value = 0.02 + pressure * 0.06;
 
     // Check noise events for investigation.
-    this._checkNoiseEvents(noiseEvents);
+    this._checkNoiseEvents(noiseEvents, pressure);
 
     // Grace period (after losing player).
     if (this.gracePeriod > 0) {
@@ -129,21 +137,21 @@ export class Entity {
     // State machine.
     switch (this.state) {
       case STATES.WANDER:
-        this._wander(dt, playerPos, lightPool);
+        this._wander(dt);
         if (hasLos) {
           const d = this.position.distanceTo(playerPos);
           if (d < CONFIG.entity.chaseLosDist && this.gracePeriod <= 0) this._setState(STATES.CHASE);
         }
         break;
       case STATES.INVESTIGATE:
-        this._investigate(dt, playerPos);
+        this._investigate(dt);
         if (hasLos && this.gracePeriod <= 0) {
           const d = this.position.distanceTo(playerPos);
           if (d < CONFIG.entity.chaseLosDist) this._setState(STATES.CHASE);
         }
         break;
       case STATES.CHASE:
-        this._chase(dt, playerPos, pressure);
+        this._follow(dt, playerPos, CONFIG.entity.chaseSpeed * (1 + pressure * (CONFIG.entity.rampSpeedMax - 1)));
         if (!hasLos) {
           this.loseTimer += dt;
           if (this.loseTimer > CONFIG.entity.loseDist) this._setState(STATES.LOSE);
@@ -156,14 +164,12 @@ export class Entity {
         }
         break;
       case STATES.LOSE:
-        this._wander(dt, playerPos, lightPool);
-        // Grace period starts when we lose the player.
-        if (this.loseTimer === 0) {
-          this.gracePeriod = CONFIG.entity.gracePeriod;
-        }
+        // Lost the player: a grace period before it can chase again.
+        this.gracePeriod = CONFIG.entity.gracePeriod;
         this._setState(STATES.WANDER);
         break;
     }
+    this.position.y = this.chunks.groundAt(this.position.x, this.position.z);
 
     // Footsteps.
     this.footstepTimer -= dt;
@@ -175,9 +181,8 @@ export class Entity {
     // Audio.
     updateEntityAudio(dt, this.position, playerPos, this.state);
 
-    // Mesh follows position.
+    // Mesh follows position, facing the next waypoint.
     this.mesh.position.copy(this.position);
-    // Face movement direction.
     if (this.path.length > 0) {
       const next = this.path[0];
       const dx = next.x - this.position.x, dz = next.z - this.position.z;
@@ -191,6 +196,7 @@ export class Entity {
   _setState(s) {
     this.state = s;
     this.loseTimer = 0;
+    this.pathTimer = 0; // new goal: re-plan now
     if (s === STATES.WANDER) this.target = null;
   }
 
@@ -198,9 +204,9 @@ export class Entity {
     return this.chunks.hasLineOfSight(this.position.x, this.position.z, playerPos.x, playerPos.z);
   }
 
-  _wander(dt, playerPos, lightPool) {
-    if (!this.target || this.position.distanceTo(this.target) < 1.5) {
-      // Pick a new wander target: a random point 8-20m away.
+  _wander(dt) {
+    // New target when arrived or when the current path has run out (target unreachable).
+    if (!this.target || this.position.distanceTo(this.target) < 1.5 || (!this.path.length && this.pathTimer > 0)) {
       const angle = Math.random() * Math.PI * 2;
       const dist = 8 + Math.random() * 12;
       this.target = new THREE.Vector3(
@@ -208,127 +214,111 @@ export class Entity {
         0,
         this.position.z + Math.sin(angle) * dist
       );
+      this.pathTimer = 0;
     }
-    this._moveToward(dt, this.target, CONFIG.entity.wanderSpeed);
+    this._follow(dt, this.target, CONFIG.entity.wanderSpeed);
   }
 
-  _investigate(dt, playerPos) {
-    if (this.noiseTarget) {
-      this._moveToward(dt, this.noiseTarget, CONFIG.entity.investigateSpeed);
-      if (this.position.distanceTo(this.noiseTarget) < 2) {
-        this.noiseTarget = null;
-        this._setState(STATES.WANDER);
-      }
-    } else {
+  _investigate(dt) {
+    if (!this.noiseTarget || this.position.distanceTo(this.noiseTarget) < 2 || (!this.path.length && this.pathTimer > 0)) {
+      this.noiseTarget = null;
       this._setState(STATES.WANDER);
+      return;
     }
+    this._follow(dt, this.noiseTarget, CONFIG.entity.investigateSpeed);
   }
 
-  _chase(dt, playerPos, pressure) {
-    const speed = CONFIG.entity.chaseSpeed * (1 + pressure * (CONFIG.entity.rampSpeedMax - 1));
-    // Recompute path at 2 Hz.
+  // Walk the A* path toward goal, re-planning at pathRecomputeHz, sliding along walls.
+  _follow(dt, goal, speed) {
     this.pathTimer -= dt;
     if (this.pathTimer <= 0) {
-      this.pathTimer = this.pathRecomputeInterval;
-      this.path = this._astar(this.position, playerPos);
+      this.pathTimer = 1 / CONFIG.entity.pathRecomputeHz;
+      this.path = this._astar(this.position, goal);
     }
-    if (this.path.length > 0) {
-      const next = this.path[0];
-      const d = this.position.distanceTo(next);
-      if (d < 0.5) this.path.shift();
-      else this._moveToward(dt, next, speed);
-    } else {
-      this._moveToward(dt, playerPos, speed);
+    const next = this.path[0];
+    if (!next) return;
+    const dx = next.x - this.position.x;
+    const dz = next.z - this.position.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.3) {
+      this.path.shift();
+      return;
     }
+    const step = Math.min(speed * dt, d);
+    this.collision.move(this.position, (dx / d) * step, (dz / d) * step, CONFIG.entity.radius);
   }
 
-  _moveToward(dt, target, speed) {
-    const dx = target.x - this.position.x;
-    const dz = target.z - this.position.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist < 0.01) return;
-    const step = Math.min(speed * dt, dist);
-    this.position.x += (dx / dist) * step;
-    this.position.z += (dz / dist) * step;
+  // Is a point inside (or within entity radius of) any collider?
+  _solid(x, z) {
+    const r = CONFIG.entity.radius;
+    for (const b of this.chunks.query(x, z, r, this.near)) {
+      if (x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) return true;
+    }
+    return false;
   }
 
-  // A* on the cell grid of loaded chunks. Capped at 4000 node expansions.
+  // A move from cell (x, z) by (dx, dz) is blocked by a wall on the shared edge or something in the next cell.
+  _blocked(x, z, dx, dz) {
+    const C = CONFIG.world.cellSize;
+    return (
+      this._solid((x + 0.5 + dx / 2) * C, (z + 0.5 + dz / 2) * C) ||
+      this._solid((x + 0.5 + dx) * C, (z + 0.5 + dz) * C)
+    );
+  }
+
+  // A* on the cell grid of loaded chunks, capped at pathMaxExpansions. Returns cell-centre waypoints
+  // ending at `to`; if the cap is hit, the path leads to the explored cell closest to `to`.
   _astar(from, to) {
     const C = CONFIG.world.cellSize;
-    const toCell = (x, z) => [Math.floor(x / C), Math.floor(z / C)];
-    const toWorld = (gx, gz) => new THREE.Vector3((gx + 0.5) * C, 0, (gz + 0.5) * C);
-
-    const [sx, sz] = toCell(from.x, from.z);
-    const [ex, ez] = toCell(to.x, to.z);
-    if (sx === ex && sz === ez) return [to.clone()];
-
+    const sx = Math.floor(from.x / C), sz = Math.floor(from.z / C);
+    const ex = Math.floor(to.x / C), ez = Math.floor(to.z / C);
     const key = (x, z) => `${x},${z}`;
     const heur = (x, z) => Math.abs(x - ex) + Math.abs(z - ez);
 
-    const open = new Map();
-    const closed = new Set();
+    const start = key(sx, sz);
+    const open = new Map([[start, [sx, sz]]]);
+    const g = new Map([[start, 0]]);
     const cameFrom = new Map();
-    const g = new Map();
-    const f = new Map();
+    const closed = new Set();
+    let best = start, bestH = heur(sx, sz), goal = null;
 
-    const startKey = key(sx, sz);
-    g.set(startKey, 0);
-    f.set(startKey, heur(sx, sz));
-    open.set(startKey, [sx, sz]);
-
-    let expansions = 0;
-    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
-
-    while (open.size > 0 && expansions < CONFIG.entity.pathMaxExpansions) {
-      // Find min f in open.
-      let minF = Infinity, minKey = null;
-      for (const [k] of open) {
-        const fv = f.get(k) ?? Infinity;
-        if (fv < minF) { minF = fv; minKey = k; }
+    for (let n = 0; open.size > 0 && n < CONFIG.entity.pathMaxExpansions; n++) {
+      let k = null, kf = Infinity;
+      for (const [ok, [ox, oz]] of open) {
+        const f = g.get(ok) + heur(ox, oz);
+        if (f < kf) { kf = f; k = ok; }
       }
-      if (!minKey) break;
-      const [cx, cz] = open.get(minKey);
-      open.delete(minKey);
-      if (cx === ex && cz === ez) {
-        // Reconstruct.
-        const path = [];
-        let ck = minKey;
-        while (cameFrom.has(ck)) {
-          const [nx, nz] = cameFrom.get(ck).split(',').map(Number);
-          path.unshift(toWorld(nx, nz));
-          ck = cameFrom.get(ck);
-        }
-        path.push(to.clone());
-        return path;
-      }
-      closed.add(minKey);
-      expansions++;
+      const [cx, cz] = open.get(k);
+      open.delete(k);
+      closed.add(k);
+      const h = heur(cx, cz);
+      if (h < bestH) { bestH = h; best = k; }
+      if (h === 0) { goal = k; break; }
 
-      for (const [dx, dz] of dirs) {
-        const nx = cx + dx, nz = cz + dz;
-        const nk = key(nx, nz);
-        if (closed.has(nk)) continue;
-        // Check walkable: no collider at centre of cell.
-        const wx = (nx + 0.5) * C, wz = (nz + 0.5) * C;
-        const boxes = this.chunks.query(wx, wz, 0.25, []);
-        if (boxes.length > 0) continue;
-        const ng = (g.get(minKey) ?? 0) + 1;
+      for (const [dx, dz] of DIRS) {
+        const nk = key(cx + dx, cz + dz);
+        if (closed.has(nk) || this._blocked(cx, cz, dx, dz)) continue;
+        const ng = g.get(k) + 1;
         if (ng < (g.get(nk) ?? Infinity)) {
-          cameFrom.set(nk, minKey);
           g.set(nk, ng);
-          f.set(nk, ng + heur(nx, nz));
-          open.set(nk, [nx, nz]);
+          cameFrom.set(nk, k);
+          open.set(nk, [cx + dx, cz + dz]);
         }
       }
     }
-    // Fallback: straight line.
-    return [to.clone()];
+
+    const path = [];
+    for (let k = goal ?? best; cameFrom.has(k); k = cameFrom.get(k)) {
+      const [x, z] = k.split(',').map(Number);
+      path.unshift(new THREE.Vector3((x + 0.5) * C, 0, (z + 0.5) * C));
+    }
+    if (goal) path.push(to.clone());
+    return path;
   }
 
-  _checkNoiseEvents(noiseEvents) {
-    if (!noiseEvents) return;
+  _checkNoiseEvents(noiseEvents, pressure) {
     const E = CONFIG.entity;
-    const hearRadius = E.hearingRadius;
+    const hearRadius = E.hearingRadius * (1 + pressure * (E.rampHearingMax - 1));
     for (const ev of noiseEvents.flush()) {
       const d = Math.hypot(ev.x - this.position.x, ev.z - this.position.z);
       if (d < Math.min(hearRadius, ev.radius)) {
@@ -351,11 +341,7 @@ export class Entity {
         // Place just outside fog behind the player.
         const yaw = camera.rotation.y;
         const backDist = CONFIG.world.loadRadius * chunkSize + 4;
-        this.position.set(
-          playerPos.x + Math.sin(yaw) * backDist,
-          0,
-          playerPos.z + Math.cos(yaw) * backDist
-        );
+        this._placeAt(playerPos.x + Math.sin(yaw) * backDist, playerPos.z + Math.cos(yaw) * backDist);
       }
     } else {
       this._relocateTimer = 0;
@@ -370,11 +356,5 @@ export class Entity {
     if (this.noiseTarget) { this.noiseTarget.x -= dx; this.noiseTarget.z -= dz; }
     for (const p of this.path) { p.x -= dx; p.z -= dz; }
     rebaseEntityAudio(dx, dz);
-  }
-
-  // Exported for lighting system (phase 6 spec).
-  flickerIntensityAt(lightPool) {
-    if (!lightPool) return 1;
-    return lightPool.flickerIntensityAt(this.position.x, this.position.y, this.position.z);
   }
 }

@@ -119,6 +119,7 @@ export const CONFIG = {
     water: 0x1f1a0b,
     waterOpacity: 0.8,
     mirrorDim: 0.55,
+    props: { breaker: 0x5a5e60, radio: 0x6b4423, cassette: 0x242424, keypad: 0x3d4a3a, tape: 0x3a352c, exit: 0x00ff88 },
   },
 
   lighting: {
@@ -131,11 +132,10 @@ export const CONFIG = {
     // Baked vertex lighting: ambient and directional terms applied at chunk build time.
     bakeAmbient: 0.18,   // base brightness added to every vertex
     bakeDirY: 0.55,      // vertical component (panels face down, so ceiling brighter)
-    // Flicker
-    flickerRate: 3.2,    // noise frequency (cycles/sec)
-    flickerDepth: 0.15,  // peak-to-peak brightness swing under flicker
-    deadPanelChance: 0.08, // fraction of normal panels that start dead
-    flickerIntensityBase: 1.0, // multiplier for flickerDepth, scaled by pressure ramp
+    deadPanelChance: 0.08, // fraction of normal panels dead from the start (pressure ramps it to entity.rampDeadPanelMax)
+    // Burst flicker per panel: steady for `gap` s (shortened by pressure), then a burst of `duration` s
+    // during which value noise sampled at `rate` switches it off whenever it drops below `offBelow`.
+    flicker: { gap: [8, 40], duration: [0.15, 0.8], rate: 22, offBelow: 0.45, low: 0.06 },
   },
 
   post: {
@@ -166,7 +166,7 @@ export const CONFIG = {
     },
     high: {
       render: { antialias: true, maxPixelRatio: 1.5 },
-      post: { enabled: true },
+      post: { enabled: true, grainStrength: 0.045, caStrength: 0.0014 },
       lighting: { poolSize: 4 },
     },
   },
@@ -208,7 +208,7 @@ export const CONFIG = {
       noiseFreqLow: 80,
       noiseFreqHigh: 400,
       baseGain: 0.18,
-      flickerGainSpike: 0.9, // gain multiplier on panel flicker
+      crackleGain: 0.35, // noise crackle when a pooled light flickers off
       crackleMs: 120,
     },
     // Footsteps
@@ -227,14 +227,12 @@ export const CONFIG = {
   },
 
   game: {
-    // Difficulty: timer seconds
-    timerEasy: 600,
-    timerNormal: 420,
-    timerHard: 300,
-    timer: 420, // active value; can be overridden by difficulty pick
+    // Timer seconds per difficulty, picked on the title screen. Hard also spawns the entity at once.
+    timers: { easy: 600, normal: 420, hard: 300 },
+    timer: 420, // active value
     // Tasks
     taskDensity: 1 / 4,   // roughly one task object per N chunks within the grid
-    tasksRequired: 4,     // one of each type must be completed
+    tapeDensity: 1 / 6,   // chance of a tape player per chunk (never in a chunk with a cassette)
     interactRange: 2.0,
     interactFacingDot: 0.5,
     // Cassette
@@ -265,14 +263,17 @@ export const CONFIG = {
     investigateSpeed: 1.8,
     // Chase
     chaseSpeed: 3.2,
-    // Hearing
+    radius: 0.3,          // collision radius
+    // Hearing (noise radii: how far each sound carries)
     hearingRadius: 18,
+    breakerNoise: 30,
+    keypadNoise: 12,
     // Pressure ramp (all are multipliers at timeLeft = 0 vs timeLeft = full)
     rampSpeedMax: 1.5,
     rampHearingMax: 1.8,
     rampFlickerMax: 3.0,
     rampDeadPanelMax: 0.35,
-    rampHumPitchHz: 20, // extra Hz added to hum at max pressure
+    rampHumPitchHz: 20, // extra Hz added to the hum, ramped over the last 60 s
     // Fairness
     overlayWarnDist: 10, // within this dist during overlay, pulse red vignette
   },

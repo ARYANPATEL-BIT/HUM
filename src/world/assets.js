@@ -27,6 +27,37 @@ export function createAssets(renderer) {
       panel: panelGeometry(),
       chair: chairGeometry(),
     },
+    // Task objects, tape players and the exit door. One geometry + material per type, shared by every instance.
+    props: {
+      geometries: propGeometries(),
+      materials: Object.fromEntries(
+        Object.entries(col.props).map(([type, color]) => [
+          type,
+          type === 'exit' ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color }),
+        ])
+      ),
+    },
+  };
+}
+
+function merge(parts) {
+  const merged = mergeGeometries(parts);
+  parts.forEach((p) => p.dispose());
+  return merged;
+}
+
+// Primitive props, origin on the floor. Small items sit on a waist-high stand.
+function propGeometries() {
+  const onStand = (w, h, d) =>
+    merge([new THREE.BoxGeometry(0.45, 0.9, 0.45).translate(0, 0.45, 0), new THREE.BoxGeometry(w, h, d).translate(0, 0.9 + h / 2, 0)]);
+  return {
+    breaker: new THREE.BoxGeometry(0.7, 1.6, 0.3).translate(0, 0.8, 0),
+    radio: onStand(0.5, 0.3, 0.25),
+    cassette: onStand(0.25, 0.05, 0.16),
+    tape: onStand(0.45, 0.18, 0.3),
+    keypad: merge([new THREE.BoxGeometry(0.12, 1.2, 0.12).translate(0, 0.6, 0), new THREE.BoxGeometry(0.3, 0.4, 0.1).translate(0, 1.35, 0)]),
+    exit: new THREE.BoxGeometry(1.2, 2.2, 0.12).translate(0, 1.1, 0),
+    code: new THREE.PlaneGeometry(1, 0.25),
   };
 }
 

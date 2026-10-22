@@ -76,18 +76,9 @@ export function updateTaskAudio(taskObjects, playerPos) {
   }
 }
 
-export function stopTaskVoice(taskId) {
-  const v = voices.get(taskId);
-  if (v) {
-    v.osc.stop();
-    v.osc.disconnect();
-    voices.delete(taskId);
-  }
-}
-
 // After floating-origin shift, re-sync panner positions.
-export function rebaseTaskAudio(dx, dz, taskObjects) {
-  for (const [id, v] of voices) {
+export function rebaseTaskAudio(dx, dz) {
+  for (const v of voices.values()) {
     v.panner.positionX.value -= dx;
     v.panner.positionZ.value -= dz;
   }

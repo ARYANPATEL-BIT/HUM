@@ -24,6 +24,7 @@ body {
   justify-content: center;
   background: rgba(10, 8, 3, 0.82);
   cursor: pointer;
+  z-index: 10;
 }
 
 .overlay.hidden {
@@ -66,6 +67,138 @@ body {
   50% {
     opacity: 0.35;
   }
+}
+
+.hidden {
+  display: none !important;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: #2b2512;
+  border: 1px solid #6d5c32;
+  padding: 8px 14px;
+  margin: 4px;
+  cursor: pointer;
+}
+
+/* HUD */
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#hud-timer {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  font-size: 1.6rem;
+}
+
+#hud-timer.danger {
+  color: #ff5a3c;
+}
+
+#hud-checklist-panel {
+  position: absolute;
+  top: 60px;
+  right: 20px;
+  padding: 4px 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+#hud-checklist {
+  list-style: none;
+  padding: 0;
+}
+
+#hud-checklist .done {
+  opacity: 0.5;
+}
+
+#hud-breaker-track {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  width: 240px;
+  height: 8px;
+  transform: translateX(-50%);
+  border: 1px solid #d8cf9a;
+}
+
+#hud-breaker-bar {
+  height: 100%;
+  width: 0;
+  background: #d8cf9a;
+}
+
+#hud-carry {
+  position: absolute;
+  bottom: 24px;
+  left: 24px;
+}
+
+/* Task overlays and end screen */
+#task-overlay-root,
+#end-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 8, 3, 0.6);
+  z-index: 5;
+}
+
+#end-screen {
+  z-index: 20;
+}
+
+.task-overlay {
+  display: none;
+}
+
+.task-overlay.active {
+  display: block;
+}
+
+.overlay-panel,
+.end-panel {
+  min-width: 280px;
+  padding: 24px 32px;
+  text-align: center;
+  background: #1a1709;
+  border: 1px solid #6d5c32;
+}
+
+.radio-static {
+  height: 24px;
+  background: repeating-linear-gradient(90deg, #d8cf9a 0 2px, transparent 2px 5px);
+}
+
+.radio-dial {
+  width: 80px;
+  height: 80px;
+  margin: 16px auto;
+  border: 2px solid #d8cf9a;
+  border-radius: 50%;
+  border-top-color: #ff5a3c;
+  cursor: ew-resize;
+}
+
+.keypad-display {
+  font-size: 2rem;
+  letter-spacing: 0.5rem;
+  margin-bottom: 12px;
+}
+
+.keypad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  gap: 4px;
+  justify-content: center;
 }
 
 .dev-info {

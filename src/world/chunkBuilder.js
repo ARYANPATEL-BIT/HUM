@@ -9,6 +9,7 @@ import { GeoBuilder } from './geoBuilder.js';
 
 const BUILD_SALT = 5;
 const TINT_SALT = 6;
+const DEAD_SALT = 7;
 const _obj = new THREE.Object3D();
 const _col = new THREE.Color();
 
@@ -85,9 +86,17 @@ export function buildChunk(data, assets) {
     addBox(px * C - ps, pz * C - ps, px * C + ps, pz * C + ps, 0, H, true, rng() * wallTexW);
   }
 
+  // Each panel gets a fixed roll; normal panels below deadPanelChance start dead (LightPool kills
+  // more as pressure rises, lowest rolls first).
+  const L = CONFIG.lighting;
+  const deadRng = mulberry32(hash(data.seed, DEAD_SALT, data.cx, data.cz));
+  for (const p of data.panels) {
+    p.roll = deadRng();
+    if (p.kind === 'normal' && p.roll < L.deadPanelChance) p.kind = 'dead';
+  }
+
   // Baked vertex lighting: approximate a panel-above contribution per vertex.
   // Each panel contributes a falloff term; ceiling gets more, floor gets base ambient.
-  const L = CONFIG.lighting;
   const bakedLight = (lx, lz, isFloor) => {
     let bright = L.bakeAmbient;
     for (const p of data.panels) {
@@ -169,6 +178,7 @@ export function buildChunk(data, assets) {
     group,
     colliders,
     panels: data.panels,
+    panelMesh: panels,
     heightAt: (lx, lz) => chunkHeightAt(data, lx, lz),
     dispose() {
       owned.forEach((g) => g.dispose());
@@ -223,6 +233,7 @@ function buildPanels(data, assets, water, tall) {
     _obj.rotation.set(Math.PI, 0, 0);
     _obj.updateMatrix();
     mesh.setMatrixAt(i, _obj.matrix);
+    p.mirror = i; // reflection instance, recoloured with the panel
     mesh.setColorAt(i++, _col.set(colorOf(p)).multiplyScalar(col.mirrorDim));
   }
   mesh.computeBoundingSphere();

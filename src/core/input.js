@@ -10,6 +10,7 @@ export class Input {
     this.mouseDY = 0;
     this.locked = false;
     this.onLockChange = null;
+    this.onLockFail = null;
 
     window.addEventListener('keydown', (e) => {
       if (!e.repeat) this.pressed.add(e.code);
@@ -38,9 +39,9 @@ export class Input {
     // Browsers refuse re-locking for ~1s after Esc; the promise rejects and the user just clicks again.
     try {
       const p = this.lockTarget.requestPointerLock();
-      if (p && p.catch) p.catch(() => {});
+      if (p && p.catch) p.catch(() => this.onLockFail?.());
     } catch {
-      /* older browsers throw synchronously */
+      this.onLockFail?.(); // older browsers throw synchronously
     }
   }
 
