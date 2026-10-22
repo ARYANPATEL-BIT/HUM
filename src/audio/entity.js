@@ -1,5 +1,3 @@
-import * as THREE from 'three';
-import { CONFIG } from '../config.js';
 import { getCtx, isReady, buses } from '../audio/audio.js';
 
 // Entity audio: HRTF panner for footsteps, low drone that grows with proximity, heartbeat during chase.

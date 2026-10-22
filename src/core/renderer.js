@@ -46,6 +46,14 @@ export function createRenderer(container) {
     scene,
     camera,
     post,
+    // Live preset switch: pixel ratio and post apply now; antialias needs a new WebGL context (reload).
+    setPreset(name) {
+      applyPreset(name);
+      const ratio = Math.min(window.devicePixelRatio, CONFIG.render.maxPixelRatio);
+      renderer.setPixelRatio(ratio);
+      post.composer.setPixelRatio(ratio);
+      resize();
+    },
     render(dt) {
       if (dt) post.tick(dt);
       if (CONFIG.post.enabled) {

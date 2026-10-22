@@ -8,6 +8,7 @@ const panners = []; // { gain, panner, active }
 let sawOsc = null;
 let sineOsc = null;
 let noiseSource = null;
+let noiseBuffer = null; // shared with the crackle
 let sharedGain = null; // connects generator output into each panner
 let initiated = false;
 
@@ -42,7 +43,7 @@ export function initHum(poolSize) {
   const sineGain = ctx.createGain();
   sineGain.gain.value = H.sineGain;
 
-  const noiseBuffer = createNoiseBuffer(ctx, 4);
+  noiseBuffer = createNoiseBuffer(ctx, 4);
   noiseSource = ctx.createBufferSource();
   noiseSource.buffer = noiseBuffer;
   noiseSource.loop = true;
@@ -111,15 +112,21 @@ export function updateHumPanners(lights) {
   }
 }
 
-// Spike the gain + play crackle when a nearby panel flickers.
+// Short noise crackle through the panner of pooled light `pannerIndex` (called when it flickers off).
 export function triggerCrackle(pannerIndex) {
-  if (!isReady() || pannerIndex < 0 || pannerIndex >= panners.length) return;
+  if (!isReady() || !initiated || !panners[pannerIndex]) return;
   const ctx = getCtx();
   const H = CONFIG.audio.hum;
-  const entry = panners[pannerIndex];
-  entry.gain.gain.cancelScheduledValues(ctx.currentTime);
-  entry.gain.gain.setValueAtTime(H.baseGain * H.flickerGainSpike, ctx.currentTime);
-  entry.gain.gain.exponentialRampToValueAtTime(H.baseGain, ctx.currentTime + H.crackleMs / 1000);
+  const t = ctx.currentTime;
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(H.crackleGain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + H.crackleMs / 1000);
+  src.connect(g);
+  g.connect(panners[pannerIndex].panner);
+  src.start(t, Math.random() * 3);
+  src.stop(t + H.crackleMs / 1000);
 }
 
 // Update listener position from camera each frame.
@@ -135,11 +142,8 @@ export function updateListener(camera) {
   } else {
     L.setPosition(pos.x, pos.y, pos.z);
   }
-  // Forward and up from camera.
-  const fwd = new Float32Array(3);
-  camera.getWorldDirection({ x: 0, y: 0, z: 0 }); // dummy
+  // Forward from yaw/pitch (camera looks down -Z at yaw 0); up is world Y.
   const dir = new Float32Array(3);
-  // Forward: camera looks down -Z in local space; get world direction.
   const sin = Math.sin(camera.rotation.y);
   const cos = Math.cos(camera.rotation.y);
   const sp = Math.sin(camera.rotation.x);

@@ -17,6 +17,7 @@ export class PlayerController {
     this.yaw = 0;
     this.pitch = 0;
     this.sprinting = false;
+    this.canSprint = true; // false while carrying the cassette
   }
 
   spawn(x, z, yaw = 0) {
@@ -51,7 +52,7 @@ export class PlayerController {
       s = 0;
     }
     const moving = f !== 0 || s !== 0;
-    this.sprinting = moving && f > 0 && input.isDown('ShiftLeft', 'ShiftRight');
+    this.sprinting = moving && f > 0 && this.canSprint && input.isDown('ShiftLeft', 'ShiftRight');
     let speed = this.sprinting ? pc.sprintSpeed : pc.walkSpeed;
     if (this.autoRun) speed = CONFIG.dev.autoRunSpeed;
 

@@ -65,9 +65,8 @@ export class HUD {
     }
 
     // Carry indicator.
-    const { isCarryingCassette } = this;
     if (this.carryEl) {
-      this.carryEl.classList.toggle('hidden', !taskManager?.cassetteTask?.isCarried);
+      this.carryEl.classList.toggle('hidden', !taskManager?.carrying);
     }
   }
 }

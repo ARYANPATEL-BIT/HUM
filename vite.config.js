@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: process.env.VITE_BASE ?? './',
   build: {
-    // three.js alone is ~520 kB minified (~130 kB gzipped); that's expected, not a problem.
-    chunkSizeWarningLimit: 700,
+    // three.js alone is ~520 kB minified (~130 kB gzipped) and the game is one bundle (~810 kB); expected.
+    chunkSizeWarningLimit: 900,
   },
 });

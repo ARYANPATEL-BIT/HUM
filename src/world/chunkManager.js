@@ -84,7 +84,7 @@ export class ChunkManager {
     this.scene.add(chunk.group);
     this.stats.built++;
     if (this.lightPool) {
-      this.lightPool.addChunk(k, data.panels, chunk.group.position);
+      this.lightPool.addChunk(k, chunk);
     }
     if (this.onChunkLoaded) this.onChunkLoaded(chunk);
     return chunk;

@@ -14,7 +14,12 @@
     <div id="overlay" class="overlay">
       <div class="panel" data-screen="title">
         <h1>HUM</h1>
-        <p class="blink">click to enter</p>
+        <div class="difficulty">
+          <button data-difficulty="easy">easy · 10:00</button>
+          <button data-difficulty="normal">normal · 7:00</button>
+          <button data-difficulty="hard">hard · 5:00</button>
+        </div>
+        <p class="blink">pick a difficulty to enter</p>
         <p class="hint">WASD move · Shift sprint · Mouse look · Esc pause · E interact · Tab checklist</p>
       </div>
       <div class="panel" data-screen="paused">
@@ -52,7 +57,8 @@
             <div class="radio-dial" title="Drag to tune"></div>
           </div>
           <div class="radio-freq">88.0 MHz</div>
-          <p class="hint">Drag the dial to find the signal. Esc to leave.</p>
+          <button data-close-overlay>close</button>
+          <p class="hint">Drag the dial to find the signal. Esc pauses.</p>
         </div>
       </div>
 
@@ -74,7 +80,8 @@
             <button class="keypad-btn keypad-clear" id="keypad-clear-btn">C</button>
             <button class="keypad-btn" data-digit="0">0</button>
           </div>
-          <p class="hint">Enter the 4-digit code. Check nearby walls. Esc to leave.</p>
+          <button data-close-overlay>close</button>
+          <p class="hint">Enter the 4-digit code. Check nearby walls. Esc pauses.</p>
         </div>
       </div>
     </div>

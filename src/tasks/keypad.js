@@ -1,8 +1,23 @@
+import { CONFIG } from '../config.js';
 import { hash, mulberry32 } from '../core/rng.js';
 import { playKeypadBeep } from '../audio/tasks.js';
+import { noiseEvents } from '../entity/noiseEvents.js';
 
 // Keypad: 4-digit code from hash(seed, id). Code is painted on a nearby wall as a canvas-texture quad.
-// The player enters the code in an HTML overlay.
+// The player enters the code in an HTML overlay. Button handlers are bound once and drive `current`.
+
+let current = null;
+let display = null;
+
+function bind() {
+  if (display) return;
+  const overlay = document.getElementById('keypad-overlay');
+  display = overlay.querySelector('.keypad-display');
+  overlay.querySelectorAll('.keypad-btn[data-digit]').forEach((btn) => {
+    btn.addEventListener('click', () => current?.digit(btn.dataset.digit));
+  });
+  overlay.querySelector('.keypad-clear').addEventListener('click', () => current?.clear());
+}
 
 export function codeForKeypad(seed, taskId) {
   const rng = mulberry32(hash(seed, 88, ...taskId.split(',').map(Number)));
@@ -10,55 +25,35 @@ export function codeForKeypad(seed, taskId) {
 }
 
 export function createKeypadTask(taskObj, seed) {
+  bind();
   const code = codeForKeypad(seed, taskObj.id);
   let input = '';
   let done = false;
+  const refresh = () => { display.textContent = input.padEnd(4, '_'); };
 
-  const overlay = document.getElementById('keypad-overlay');
-  const displayEl = overlay?.querySelector('.keypad-display');
-  const buttons = overlay?.querySelectorAll('.keypad-btn[data-digit]');
-  const clearBtn = overlay?.querySelector('.keypad-clear');
-
-  function refreshDisplay() {
-    if (displayEl) displayEl.textContent = input.padEnd(4, '_');
-  }
-
-  function onDigit(d) {
-    if (input.length >= 4) return;
-    input += d;
-    playKeypadBeep(false);
-    refreshDisplay();
-    if (input.length === 4) {
+  current = {
+    type: 'keypad',
+    taskObj,
+    get done() { return done; },
+    digit(d) {
+      if (done || input.length >= 4) return;
+      input += d;
+      playKeypadBeep(false);
+      noiseEvents.emit(taskObj.wx, taskObj.wz, CONFIG.entity.keypadNoise);
+      refresh();
+      if (input.length < 4) return;
       if (input === code) {
         done = true;
         playKeypadBeep(true);
       } else {
-        setTimeout(() => { input = ''; refreshDisplay(); }, 400);
+        setTimeout(() => { input = ''; refresh(); }, 400);
       }
-    }
-  }
-
-  function onClear() { input = ''; refreshDisplay(); }
-
-  if (buttons) {
-    buttons.forEach((btn) => {
-      btn.addEventListener('click', () => onDigit(btn.dataset.digit));
-    });
-  }
-  if (clearBtn) clearBtn.addEventListener('click', onClear);
-
-  refreshDisplay();
-
-  return {
-    type: 'keypad',
-    taskObj,
-    code,
-    get done() { return done; },
-    devComplete() { done = true; },
-    dispose() {
-      if (buttons) buttons.forEach((btn) => btn.removeEventListener('click', () => {}));
     },
+    clear() { input = ''; refresh(); },
+    devComplete() { done = true; },
   };
+  refresh();
+  return current;
 }
 
 // Generate a canvas texture showing the 4-digit code.
