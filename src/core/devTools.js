@@ -5,6 +5,15 @@ import { CONFIG } from '../config.js';
 
 const _v = new THREE.Vector3();
 
+// Dev-only settings (kept out of CONFIG so none of this ships in the production bundle).
+const DEV = {
+  infoUpdateInterval: 0.25,
+  debugKey: 'Backquote',
+  autoRunKey: 'KeyG',
+  autoRunSpeed: 25,
+  fogWarnThreshold: 0.99,
+};
+
 // Dev builds only (dynamically imported behind import.meta.env.DEV).
 // Debug mode (backquote) also draws the entity's A* path and a state label above it.
 export class DevTools {
@@ -20,8 +29,14 @@ export class DevTools {
     this.label = document.createElement('div');
     this.label.style.cssText = 'position:fixed;left:0;top:0;color:#f55;font-size:12px;pointer-events:none';
     document.body.appendChild(this.label);
-    this.info = document.getElementById('dev-info');
-    this.info.hidden = false;
+    this.info = document.createElement('div');
+    this.info.className = 'dev-info';
+    this.info.style.cssText =
+      'position:fixed;z-index:3;top:52px;left:0;padding:4px 6px;font-size:11px;line-height:1.4;' +
+      'background:rgba(0,0,0,0.6);color:#9f9;white-space:pre;pointer-events:none';
+    document.body.appendChild(this.info);
+    // Count every pass of a frame (render pass + post), not just the last render() call.
+    gfx.renderer.info.autoReset = false;
     this.stats = new Stats();
     document.body.appendChild(this.stats.dom);
     this.acc = 0;
@@ -79,7 +94,7 @@ export class DevTools {
   checkFogCoversLoading() {
     const d = CONFIG.world.loadRadius * this.chunks.size;
     const hidden = 1 - Math.exp(-((CONFIG.atmosphere.fogDensity * d) ** 2));
-    if (hidden < CONFIG.dev.fogWarnThreshold) {
+    if (hidden < DEV.fogWarnThreshold) {
       console.warn(`Fog only hides ${(hidden * 100).toFixed(1)}% at ${d} m: chunk loading may be visible.`);
     }
   }
@@ -135,17 +150,20 @@ export class DevTools {
     gui.add(copyObj, 'copyConfig').name('Copy config to clipboard');
   }
 
-  begin() { this.stats.begin(); }
+  begin() {
+    this.stats.begin();
+    this.gfx.renderer.info.reset();
+  }
   end() { this.stats.end(); }
 
   update(dt) {
     const input = this.input;
-    if (input.wasPressed(CONFIG.dev.debugKey)) {
+    if (input.wasPressed(DEV.debugKey)) {
       this.debug = !this.debug;
       this.grid.visible = this.debug;
       this.gfx.scene.fog.density = this.debug ? 0 : CONFIG.atmosphere.fogDensity;
     }
-    if (input.wasPressed(CONFIG.dev.autoRunKey)) this.player.autoRun = !this.player.autoRun;
+    if (input.wasPressed(DEV.autoRunKey)) this.player.autoRun = this.player.autoRun ? 0 : DEV.autoRunSpeed;
 
     if (this.debug) {
       const [cx, cz] = this.chunks.chunkAt(this.player.position.x, this.player.position.z);
@@ -155,7 +173,7 @@ export class DevTools {
     this.drawEntity();
 
     this.acc += dt;
-    if (this.acc < CONFIG.dev.infoUpdateInterval) return;
+    if (this.acc < DEV.infoUpdateInterval) return;
     this.acc = 0;
     const r = this.gfx.renderer.info;
     const p = this.player.position;
