@@ -10,7 +10,7 @@ let heartbeatActive = false;
 let initiated = false;
 
 export function initEntityAudio() {
-  if (!isReady() || initiated) return;
+  if (!getCtx() || initiated) return;
   initiated = true;
   const ctx = getCtx();
   const bus = buses.entity;
