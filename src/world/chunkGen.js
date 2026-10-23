@@ -11,7 +11,7 @@ import { hash, mulberry32, randInt, shuffle } from '../core/rng.js';
 // but both chunks compute both from the same edge hash so they always agree.
 
 const SALT = { CHUNK: 1, EDGE_H: 2, EDGE_V: 3, LANDMARK: 4 };
-export const LANDMARK_TYPES = ['flooded', 'chairs', 'redLight', 'stairs'];
+const LANDMARK_TYPES = ['flooded', 'chairs', 'redLight', 'stairs'];
 export const CELL_NO_FLOOR = 1;
 export const CELL_TALL = 2;
 
@@ -307,6 +307,21 @@ function applyRedLight(rect, panels, C) {
     if (!best || Math.hypot(p.x - cx, p.z - cz) < Math.hypot(best.x - cx, best.z - cz)) best = p;
   }
   if (best) best.kind = 'red';
+}
+
+// Yaw the player spawns with in chunk (0, 0): towards the first open side of the spawn cell.
+// Forward at yaw is (-sin, -cos).
+export function spawnYaw(data) {
+  const [sx, sz] = CONFIG.world.spawnCell;
+  const { h, v, n } = data;
+  const options = [
+    [h[sz * n + sx], 0],
+    [v[(sx + 1) * n + sz], -Math.PI / 2],
+    [h[(sz + 1) * n + sx], Math.PI],
+    [v[sx * n + sz], Math.PI / 2],
+  ];
+  const open = options.find(([wall]) => !wall);
+  return open ? open[1] : 0;
 }
 
 // Ground height inside a chunk (local meters). Only the stairs landmark isn't flat.
