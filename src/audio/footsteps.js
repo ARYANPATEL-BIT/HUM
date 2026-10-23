@@ -1,10 +1,10 @@
 import { getCtx, isReady, buses } from './audio.js';
 import { CONFIG } from '../config.js';
 
-// Footstep system: one noise buffer, played through a lowpass per step with pitch/gain variation.
+// Footsteps: one noise buffer, played through a lowpass per step with pitch/gain variation.
+// The player controller decides when a foot lands (its step phase also drives the head bob).
 
 let noiseBuffer = null;
-let stepTimer = 0;
 
 function ensureBuffer() {
   if (noiseBuffer) return;
@@ -18,21 +18,9 @@ function ensureBuffer() {
   }
 }
 
-export function updateFootsteps(dt, speed, isSprinting) {
-  if (!isReady() || speed < 0.3) {
-    stepTimer = 0;
-    return;
-  }
+export function playFootstep(sprint) {
+  if (!isReady()) return;
   ensureBuffer();
-  const F = CONFIG.audio.footsteps;
-  const interval = isSprinting ? F.sprintInterval : F.walkInterval;
-  stepTimer -= dt;
-  if (stepTimer > 0) return;
-  stepTimer = interval;
-  playStep(isSprinting);
-}
-
-function playStep(sprint) {
   const ctx = getCtx();
   const F = CONFIG.audio.footsteps;
   const rng = Math.random;
