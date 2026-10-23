@@ -1,5 +1,5 @@
 import { CONFIG } from '../config.js';
-import { generateChunk } from './chunkGen.js';
+import { generateChunk, spawnYaw } from './chunkGen.js';
 import { buildChunk } from './chunkBuilder.js';
 
 // Streams chunks around the player and owns the floating origin.
@@ -221,15 +221,7 @@ export class ChunkManager {
     const [sx, sz] = CONFIG.world.spawnCell;
     const C = CONFIG.world.cellSize;
     const c = this.get(0, 0) || (this.load(0, 0), this.get(0, 0));
-    const { h, v, n } = c.data;
-    const options = [
-      [h[sz * n + sx], 0],
-      [v[(sx + 1) * n + sz], -Math.PI / 2],
-      [h[(sz + 1) * n + sx], Math.PI],
-      [v[sx * n + sz], Math.PI / 2],
-    ];
-    const open = options.find(([wall]) => !wall);
-    return { x: c.ox + (sx + 0.5) * C, z: c.oz + (sz + 0.5) * C, yaw: open ? open[1] : 0 };
+    return { x: c.ox + (sx + 0.5) * C, z: c.oz + (sz + 0.5) * C, yaw: spawnYaw(c.data) };
   }
 
   get loadedCount() {
