@@ -134,10 +134,93 @@ button {
   background: #d8cf9a;
 }
 
-#hud-carry {
+#hud-carry,
+#hud-bottles {
   position: absolute;
   bottom: 24px;
   left: 24px;
+  opacity: 0.8;
+}
+
+#hud-bottles {
+  bottom: 48px;
+}
+
+#hud-crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: rgba(216, 207, 154, 0.5);
+}
+
+#hud-prompt {
+  position: absolute;
+  top: calc(50% + 32px);
+  left: 0;
+  right: 0;
+  text-align: center;
+  text-shadow: 0 0 4px #000;
+}
+
+#hud-stamina-track {
+  position: absolute;
+  bottom: 56px;
+  left: 50%;
+  width: 160px;
+  height: 4px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+#hud-stamina-bar {
+  height: 100%;
+  background: rgba(216, 207, 154, 0.7);
+}
+
+#hud-stamina-track.exhausted #hud-stamina-bar {
+  background: #ff5a3c;
+}
+
+/* Note reader */
+#note {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  transform: translate(-50%, -50%) rotate(-0.6deg);
+  padding: 20px 28px;
+  background: #e9e0c2;
+  color: #2a2418;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+  z-index: 4;
+}
+
+#note .note-number {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+
+#note .note-title {
+  margin: 8px 0 12px;
+  font-size: 1.3rem;
+  letter-spacing: 0.1rem;
+  font-weight: bold;
+}
+
+#note .note-body {
+  white-space: pre-line;
+  line-height: 1.45;
+}
+
+#note .hint {
+  margin-top: 1rem;
 }
 
 /* Task overlays and end screen */
@@ -154,6 +237,68 @@ button {
 
 #end-screen {
   z-index: 20;
+}
+
+.end-reason {
+  margin-top: -0.5rem;
+  opacity: 0.7;
+}
+
+.end-stats {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 20px;
+  margin: 20px 0;
+  text-align: left;
+}
+
+.end-stats dt {
+  opacity: 0.6;
+}
+
+.end-stats dd {
+  margin: 0;
+}
+
+/* Settings */
+.settings-grid {
+  display: grid;
+  gap: 10px;
+  min-width: 320px;
+  margin: 0 auto 1rem;
+  text-align: left;
+}
+
+.settings-grid label {
+  display: grid;
+  grid-template-columns: 1fr 140px 48px;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-grid select,
+.settings-grid input[type='checkbox'] {
+  justify-self: start;
+}
+
+.settings-grid select {
+  font: inherit;
+  color: inherit;
+  background: #2b2512;
+  border: 1px solid #6d5c32;
+}
+
+.settings-grid input[type='range'] {
+  accent-color: #d8cf9a;
+}
+
+.settings-grid output {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.panel.settings {
+  cursor: default;
 }
 
 .task-overlay {
@@ -199,17 +344,4 @@ button {
   grid-template-columns: repeat(3, 56px);
   gap: 4px;
   justify-content: center;
-}
-
-.dev-info {
-  position: fixed;
-  top: 52px;
-  left: 0;
-  padding: 4px 6px;
-  font-size: 11px;
-  line-height: 1.4;
-  background: rgba(0, 0, 0, 0.6);
-  color: #9f9;
-  white-space: pre;
-  pointer-events: none;
 }
