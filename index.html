@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HUM</title>
     <meta name="description" content="HUM – a procedural horror game. Escape before time runs out." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%232b2512'/%3E%3Crect x='3' y='6' width='10' height='4' fill='%23fff6dc'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./src/ui/style.css" />
   </head>
   <body>
     <div id="app"></div>
 
-    <!-- Title / Paused / Touch overlays -->
+    <!-- Title / Paused / Settings / Touch overlays -->
     <div id="overlay" class="overlay">
       <div class="panel" data-screen="title">
         <h1>HUM</h1>
@@ -20,12 +21,35 @@
           <button data-difficulty="hard">hard · 5:00</button>
         </div>
         <p class="blink">pick a difficulty to enter</p>
-        <p class="hint">WASD move · Shift sprint · Mouse look · Esc pause · E interact · Tab checklist</p>
+        <button data-open-settings>settings</button>
+        <p class="hint">
+          WASD move · Shift sprint · Mouse look · E interact · Q chalk · R drink · Tab checklist · Esc pause
+        </p>
       </div>
       <div class="panel" data-screen="paused">
         <h2>paused</h2>
         <p class="blink">click to resume</p>
+        <button data-open-settings>settings</button>
         <p class="hint">seed <span id="seed"></span></p>
+      </div>
+      <div class="panel settings" data-screen="settings">
+        <h2>settings</h2>
+        <div class="settings-grid">
+          <label>graphics
+            <select data-setting="preset">
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </select>
+          </label>
+          <label>field of view <input type="range" min="60" max="100" step="1" data-setting="fov" /><output></output></label>
+          <label>mouse sensitivity <input type="range" min="0.2" max="3" step="0.05" data-setting="sensitivity" /><output></output></label>
+          <label>invert mouse Y <input type="checkbox" data-setting="invertY" /></label>
+          <label>head bob <input type="checkbox" data-setting="headBob" /></label>
+          <label>volume <input type="range" min="0" max="1" step="0.05" data-setting="volume" /><output></output></label>
+        </div>
+        <p class="hint" data-reload-note hidden>antialiasing for this preset applies after a reload</p>
+        <button data-settings-back>back</button>
       </div>
       <div class="panel" data-screen="touch">
         <h2>desktop only</h2>
@@ -35,6 +59,8 @@
 
     <!-- HUD (always visible during play) -->
     <div id="hud">
+      <div id="hud-crosshair"></div>
+      <div id="hud-prompt"></div>
       <div id="hud-timer">0:00</div>
       <div id="hud-checklist-panel" class="hidden">
         <h3>Tasks</h3>
@@ -43,7 +69,19 @@
       <div id="hud-breaker-track" class="hidden">
         <div id="hud-breaker-bar"></div>
       </div>
-      <div id="hud-carry" class="hidden">📼 carrying cassette</div>
+      <div id="hud-stamina-track" class="hidden">
+        <div id="hud-stamina-bar"></div>
+      </div>
+      <div id="hud-bottles" class="hidden"></div>
+      <div id="hud-carry" class="hidden">carrying cassette · can't run · find a tape player in another room</div>
+    </div>
+
+    <!-- Note reader (pointer stays locked; E closes) -->
+    <div id="note" class="hidden">
+      <p class="note-number"></p>
+      <h2 class="note-title"></h2>
+      <p class="note-body"></p>
+      <p class="hint">E to put it down</p>
     </div>
 
     <!-- Task overlays (on top of canvas, world keeps running) -->
@@ -58,7 +96,7 @@
           </div>
           <div class="radio-freq">88.0 MHz</div>
           <button data-close-overlay>close</button>
-          <p class="hint">Drag the dial to find the signal. Esc pauses.</p>
+          <p class="hint">Drag the dial left and right. When the static is almost gone, hold still. Esc pauses.</p>
         </div>
       </div>
 
@@ -77,11 +115,11 @@
             <button class="keypad-btn" data-digit="7">7</button>
             <button class="keypad-btn" data-digit="8">8</button>
             <button class="keypad-btn" data-digit="9">9</button>
-            <button class="keypad-btn keypad-clear" id="keypad-clear-btn">C</button>
+            <button class="keypad-btn keypad-clear">C</button>
             <button class="keypad-btn" data-digit="0">0</button>
           </div>
           <button data-close-overlay>close</button>
-          <p class="hint">Enter the 4-digit code. Check nearby walls. Esc pauses.</p>
+          <p class="hint">Enter the 4-digit code. It's painted on a wall nearby. Esc pauses.</p>
         </div>
       </div>
     </div>
@@ -89,19 +127,15 @@
     <!-- End screen -->
     <div id="end-screen" class="hidden">
       <div class="end-panel">
-        <h1 class="end-result">FAILED</h1>
-        <p class="end-tasks">Tasks: 0/4</p>
-        <p class="end-time">Time left: 0s</p>
-        <p class="end-walked">Distance: 0 m</p>
-        <p class="end-seed">Seed: 0</p>
+        <h1 class="end-result"></h1>
+        <p class="end-reason"></p>
+        <dl class="end-stats"></dl>
         <div class="end-buttons">
           <button data-restart-same>Retry same seed</button>
           <button data-restart-new>New seed</button>
         </div>
       </div>
     </div>
-
-    <div id="dev-info" class="dev-info" hidden></div>
 
     <script type="module" src="./src/main.js"></script>
   </body>
