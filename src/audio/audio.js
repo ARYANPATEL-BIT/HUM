@@ -1,7 +1,9 @@
 import { CONFIG } from '../config.js';
 
-// One AudioContext, created on first click. Master → DynamicsCompressor → destination.
+// One AudioContext, created when the game first starts. Master → DynamicsCompressor → destination.
 // Separate gain buses for ambience / sfx / entity / ui.
+// A new context can report 'suspended' until the browser starts it (Firefox, Safari, autoplay rules),
+// so generators are built as soon as the context exists and resumeAudio() runs on every click.
 let ctx = null;
 let master = null;
 let compressor = null;
@@ -13,6 +15,7 @@ export function isReady() { return ctx !== null && ctx.state === 'running'; }
 export function initAudio() {
   if (ctx) return;
   ctx = new (window.AudioContext || window.webkitAudioContext)();
+  resumeAudio();
   compressor = ctx.createDynamicsCompressor();
   compressor.threshold.value = -18;
   compressor.knee.value = 10;
@@ -31,6 +34,15 @@ export function initAudio() {
     g.connect(master);
     buses[name] = g;
   }
+}
+
+export function resumeAudio() {
+  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+}
+
+export function setMasterVolume(v) {
+  CONFIG.audio.masterVolume = v;
+  if (master) master.gain.setTargetAtTime(v, ctx.currentTime, 0.05);
 }
 
 // Muffles the world (ambience + sfx) through a lowpass while a task overlay is open.
