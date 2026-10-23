@@ -119,7 +119,11 @@ export const CONFIG = {
     water: 0x1f1a0b,
     waterOpacity: 0.8,
     mirrorDim: 0.55,
-    props: { breaker: 0x5a5e60, radio: 0x6b4423, cassette: 0x242424, keypad: 0x3d4a3a, tape: 0x3a352c, exit: 0x00ff88 },
+    props: {
+      breaker: 0x5a5e60, radio: 0x6b4423, cassette: 0x242424, keypad: 0x3d4a3a, tape: 0x3a352c, exit: 0x00ff88,
+      bottle: 0xcfe4e8, note: 0xeee6cc,
+    },
+    chalk: 0xf4f1e6,
   },
 
   lighting: {
@@ -150,7 +154,7 @@ export const CONFIG = {
     caStrength: 0.0014,
   },
 
-  // Graphics presets applied at startup (or switchable in the dev panel).
+  // Graphics presets applied at startup (switchable in the settings menu and the dev panel).
   // 'preset' is the active preset name; the object under that key is merged into render/post.
   preset: 'high',
   presets: {
@@ -179,6 +183,12 @@ export const CONFIG = {
     accel: 12,
     decel: 14,
     stepSmoothing: 14,
+    // Sprint stamina (0..1). Empty = no sprint until it refills to minToSprint.
+    stamina: { drain: 1 / 7, regen: 1 / 10, regenDelay: 1.2, minToSprint: 0.25 },
+    // Step length in meters (walk -> sprint); footsteps and head bob both run off the step phase.
+    stride: [1.35, 1.55],
+    // Head bob (can be switched off in settings): vertical dip per step, sideways sway per stride.
+    bob: { enabled: true, vertical: 0.04, sideways: 0.025, sprintScale: 1.4, fade: 8 },
   },
 
   input: {
@@ -213,14 +223,16 @@ export const CONFIG = {
     },
     // Footsteps
     footsteps: {
-      walkInterval: 0.52,  // seconds between steps at walk speed
-      sprintInterval: 0.32,
       filterFreq: 800,
       gainBase: 0.25,
       gainVariation: 0.15,
       pitchVariation: 0.12,
       sprintGain: 0.45,
     },
+    // Chalk scratch, drinking, note pickup
+    chalkGain: 0.25,
+    drinkGain: 0.3,
+    paperGain: 0.3,
     // Task audio voice cap
     taskVoiceRadius: 30,
     taskVoiceMax: 4,
@@ -243,6 +255,19 @@ export const CONFIG = {
     // Density guarantee: if no unused task within this range, force one in next chunk
     densityMinRange: 40,
     densityMaxRange: 80,
+    // Water bottles: chance per chunk, how many the player can hold. Drinking refills sprint stamina.
+    bottleChance: 0.3,
+    bottleMax: 3,
+    // Notes: chance per chunk (the spawn chunk always has one). Which of the 15 a pickup shows is
+    // decided when it is picked up: the lowest-numbered note this browser has not read yet.
+    noteChance: 0.2,
+  },
+
+  chalk: {
+    maxMarks: 128,   // oldest mark is reused after this
+    reach: 3,        // meters from the eye to a wall or floor
+    size: 0.45,
+    cooldown: 0.35,
   },
 
   entity: {
@@ -276,14 +301,6 @@ export const CONFIG = {
     rampHumPitchHz: 20, // extra Hz added to the hum, ramped over the last 60 s
     // Fairness
     overlayWarnDist: 10, // within this dist during overlay, pulse red vignette
-  },
-
-  dev: {
-    infoUpdateInterval: 0.25,
-    debugKey: 'Backquote',
-    autoRunKey: 'KeyG',
-    autoRunSpeed: 25,
-    fogWarnThreshold: 0.99,
   },
 };
 
