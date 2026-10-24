@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { createComposer } from './post.js';
 
-export function applyPreset(name) {
+function applyPreset(name) {
   const preset = CONFIG.presets[name];
   if (!preset) return;
   // Shallow merge preset overrides into live config.
