@@ -21,7 +21,7 @@ function createNoiseBuffer(ctx, seconds = 2) {
 }
 
 export function initHum(poolSize) {
-  if (!isReady() || initiated) return;
+  if (!getCtx() || initiated) return;
   initiated = true;
   const ctx = getCtx();
   const H = CONFIG.audio.hum;

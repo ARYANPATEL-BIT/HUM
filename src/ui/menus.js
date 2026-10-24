@@ -1,17 +1,24 @@
-// Full-screen overlay panels (title / paused / touch). Only one is visible at a time.
+// Full-screen overlay panels (title / paused / settings / touch). Only one is visible at a time.
 export class Menus {
   constructor(root) {
     this.root = root;
     this.panels = new Map();
+    this.current = null;
+    this.previous = null; // where settings' back button returns to
     root.querySelectorAll('[data-screen]').forEach((el) => this.panels.set(el.dataset.screen, el));
+    root.querySelectorAll('[data-open-settings]').forEach((b) => b.addEventListener('click', () => this.show('settings')));
+    root.querySelector('[data-settings-back]')?.addEventListener('click', () => this.show(this.previous ?? 'title'));
   }
 
   show(name) {
+    if (name === 'settings' && this.current !== 'settings') this.previous = this.current;
+    this.current = name;
     this.root.classList.remove('hidden');
     for (const [key, el] of this.panels) el.classList.toggle('active', key === name);
   }
 
   hide() {
+    this.current = null;
     this.root.classList.add('hidden');
   }
 

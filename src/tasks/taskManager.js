@@ -7,7 +7,7 @@ import { setMuffle } from '../audio/audio.js';
 import { playExitTone } from '../audio/tasks.js';
 import { TASK_TYPES } from '../world/taskObjects.js';
 
-// Task manager: interaction, overlay routing, cassette carrying, exit door, win/lose.
+// Task manager: interaction (tasks and pickups), overlay routing, cassette carrying, exit door, win/lose.
 // Opening an overlay releases pointer lock; main.js re-locks from the close button and treats
 // Esc as pause, so the overlay never trips the normal "lost lock → paused" path.
 export class TaskManager {
@@ -18,6 +18,8 @@ export class TaskManager {
     this.seed = seed;
     this.player = player;
     this.lightPool = null; // set by main.js
+    this.pickups = null; // set by main.js: E also picks up bottles and notes
+    this.onPickup = null; // (type) => void, set by main.js
 
     this.activeTask = null; // open overlay task, or the breaker being held
     this.overlayOpen = false;
@@ -30,6 +32,7 @@ export class TaskManager {
 
     this.timeLeft = CONFIG.game.timer;
     this.timerRunning = false;
+    this.holdTimer = false; // true while a note is open
   }
 
   start() { this.timerRunning = true; }
@@ -38,7 +41,7 @@ export class TaskManager {
   update(dt, player, input) {
     if (this.lost || this.won) return;
 
-    if (this.timerRunning && !this.overlayOpen) {
+    if (this.timerRunning && !this.overlayOpen && !this.holdTimer) {
       this.timeLeft -= dt;
       if (this.timeLeft <= 0) {
         this.timeLeft = 0;
@@ -58,6 +61,11 @@ export class TaskManager {
     }
   }
 
+  // Loaded task objects of a type that still needs doing.
+  get pending() {
+    return this.taskObjects.active.filter((t) => !this.completedTypes.has(t.type));
+  }
+
   _facing(player, t, minDot) {
     const dx = t.wx - player.position.x;
     const dz = t.wz - player.position.z;
@@ -66,36 +74,71 @@ export class TaskManager {
     return (-Math.sin(player.yaw) * dx - Math.cos(player.yaw) * dz) / dist >= minDot;
   }
 
-  _tryInteract(player) {
+  // What E would do right now: { kind: 'deliver' | 'task' | 'pickup', t } or null.
+  // Delivering the carried cassette wins, then the nearest faced task object, then pickups.
+  interactTarget(player) {
     const pos = player.position;
     const G = CONFIG.game;
-
-    // Deliver the carried cassette to a tape player in another chunk.
     if (this.carrying) {
       const c = this.carrying;
       for (const t of this.taskObjects.tapes) {
         if (t.cx === c.cx && t.cz === c.cz) continue;
-        if (Math.hypot(pos.x - t.wx, pos.z - t.wz) < G.cassetteDeliverRange) {
-          this.carrying = null;
-          this._complete(c);
-          return;
-        }
+        if (Math.hypot(pos.x - t.wx, pos.z - t.wz) < G.cassetteDeliverRange) return { kind: 'deliver', t };
       }
     }
-
-    for (const t of this.taskObjects.active) {
+    for (const t of this.pending) {
       if (Math.hypot(pos.x - t.wx, pos.z - t.wz) > G.interactRange) continue;
       if (!this._facing(player, t, G.interactFacingDot)) continue;
-      this._open(t);
-      return;
+      if (t.type === 'cassette' && this.carrying) continue;
+      return { kind: 'task', t };
+    }
+    const p = this.pickups?.target(player);
+    return p ? { kind: 'pickup', t: p } : null;
+  }
+
+  // Interaction prompt for the HUD.
+  promptFor(player) {
+    if (this.overlayOpen || this.activeTask) return null;
+    const target = this.interactTarget(player);
+    if (!target) {
+      // A tape player in the cassette's own chunk won't take it.
+      const c = this.carrying;
+      const near = c && this.taskObjects.tapes.find((t) => Math.hypot(player.position.x - t.wx, player.position.z - t.wz) < CONFIG.game.cassetteDeliverRange);
+      return near ? 'this player is too close to where the tape was. find another.' : null;
+    }
+    const { kind, t } = target;
+    if (kind === 'deliver') return '[E] play the cassette';
+    if (kind === 'pickup') {
+      if (t.type === 'note') return '[E] read note';
+      return this.pickups.handsFull ? 'hands full (R to drink)' : '[E] take water';
+    }
+    return {
+      breaker: '[E] hold to reset the breaker',
+      radio: '[E] tune the radio',
+      cassette: '[E] take the cassette',
+      keypad: '[E] use the keypad',
+    }[t.type];
+  }
+
+  _tryInteract(player) {
+    const target = this.interactTarget(player);
+    if (!target) return;
+    if (target.kind === 'deliver') {
+      const c = this.carrying;
+      this.carrying = null;
+      this._complete(c);
+    } else if (target.kind === 'task') {
+      this._open(target.t);
+    } else {
+      const type = this.pickups.take(target.t);
+      if (type) this.onPickup?.(type);
     }
   }
 
   _open(t) {
     if (t.type === 'breaker') {
-      this.activeTask = createBreakerTask(t, this.lightPool);
+      if (this.activeTask?.taskObj !== t) this.activeTask = createBreakerTask(t, this.lightPool);
     } else if (t.type === 'cassette') {
-      if (this.carrying) return;
       this.carrying = t;
       t.carried = true;
       if (t.mesh) t.mesh.visible = false;
@@ -179,13 +222,21 @@ export class TaskManager {
     this.won = true;
     this.timerRunning = false;
     this.exitDoor.tone?.stop();
-    document.dispatchEvent(new CustomEvent('game-end', { detail: { won: true, timeLeft: this.timeLeft } }));
+    document.dispatchEvent(new CustomEvent('game-end', { detail: { cause: 'escaped' } }));
   }
 
   _triggerLose() {
     this.lost = true;
     this.timerRunning = false;
-    document.dispatchEvent(new CustomEvent('game-end', { detail: { won: false, timeLeft: 0 } }));
+    document.dispatchEvent(new CustomEvent('game-end', { detail: { cause: 'time' } }));
+  }
+
+  // The entity reached the player.
+  caught() {
+    if (this.won || this.lost) return;
+    this.lost = true;
+    this.timerRunning = false;
+    document.dispatchEvent(new CustomEvent('game-end', { detail: { cause: 'caught' } }));
   }
 
   // Dev: complete the open task, or the nearest active one.
@@ -200,7 +251,7 @@ export class TaskManager {
 
   devNearestTask(playerPos) {
     let best = null, bestD = Infinity;
-    for (const t of this.taskObjects.active) {
+    for (const t of this.pending) {
       const d = Math.hypot(t.wx - playerPos.x, t.wz - playerPos.z);
       if (d < bestD) { bestD = d; best = t; }
     }

@@ -45,7 +45,9 @@ const ComboShader = {
       vec4 r = texture2D(tDiffuse, vUv + dir * caStr);
       vec4 g = texture2D(tDiffuse, vUv);
       vec4 b = texture2D(tDiffuse, vUv - dir * caStr);
-      vec4 col = vec4(r.r, g.g, b.b, g.a);
+      // The render target holds linear colour; convert to the screen's sRGB before grading,
+      // so grain and vignette work in display space (renderer.render does this for us when post is off).
+      vec4 col = linearToOutputTexel(vec4(r.r, g.g, b.b, g.a));
 
       // Film grain.
       vec2 noiseUv = floor(vUv / grainSize * 1024.0) / 1024.0;

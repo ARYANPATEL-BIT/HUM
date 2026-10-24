@@ -13,6 +13,8 @@ export class Input {
     this.onLockFail = null;
 
     window.addEventListener('keydown', (e) => {
+      // In game Tab is the checklist; don't let it move focus onto (and later "click") a menu button.
+      if (e.code === 'Tab' && this.locked) e.preventDefault();
       if (!e.repeat) this.pressed.add(e.code);
       this.keys.add(e.code);
     });

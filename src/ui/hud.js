@@ -1,36 +1,47 @@
-// HUD: countdown timer, task checklist (Tab toggles), breaker progress bar.
-// Updates by reading from the DOM elements created in index.html.
+import { NOTES } from '../content/notes.js';
+import { TASK_TYPES } from '../world/taskObjects.js';
+
+// HUD: countdown timer, task checklist (Tab toggles), breaker progress bar, stamina bar, bottles,
+// interaction prompt, the note reader and the end screen. Elements come from index.html.
+
+const $ = (id) => document.getElementById(id);
+const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export class HUD {
   constructor() {
-    this.timerEl = document.getElementById('hud-timer');
-    this.checklistEl = document.getElementById('hud-checklist');
-    this.checklistPanel = document.getElementById('hud-checklist-panel');
-    this.breakerBarEl = document.getElementById('hud-breaker-bar');
-    this.breakerTrackEl = document.getElementById('hud-breaker-track');
-    this.carryEl = document.getElementById('hud-carry');
+    this.timerEl = $('hud-timer');
+    this.checklistEl = $('hud-checklist');
+    this.checklistPanel = $('hud-checklist-panel');
+    this.breakerBarEl = $('hud-breaker-bar');
+    this.breakerTrackEl = $('hud-breaker-track');
+    this.staminaTrackEl = $('hud-stamina-track');
+    this.staminaBarEl = $('hud-stamina-bar');
+    this.carryEl = $('hud-carry');
+    this.bottlesEl = $('hud-bottles');
+    this.promptEl = $('hud-prompt');
+    this.noteEl = $('note');
     this.checklistVisible = false;
     this.completedTypes = new Set();
-    this.taskTypes = ['breaker', 'radio', 'cassette', 'keypad'];
+    this.flashText = '';
+    this.flashTime = 0;
 
     document.addEventListener('task-complete', (e) => {
       this.completedTypes.add(e.detail.type);
       this.refreshChecklist();
+      this.flash(`${e.detail.type} done · ${this.completedTypes.size}/${TASK_TYPES.length}`);
     });
     document.addEventListener('exit-spawned', () => {
-      if (this.checklistEl) {
-        const li = document.createElement('li');
-        li.textContent = '→ EXIT DOOR OPEN';
-        li.className = 'exit-item';
-        this.checklistEl.appendChild(li);
-      }
+      const li = document.createElement('li');
+      li.textContent = '→ EXIT DOOR OPEN · follow the low tone';
+      li.className = 'exit-item';
+      this.checklistEl.appendChild(li);
+      this.flash('a door has opened somewhere. listen.', 4);
     });
   }
 
   refreshChecklist() {
-    if (!this.checklistEl) return;
     this.checklistEl.innerHTML = '';
-    for (const type of this.taskTypes) {
+    for (const type of TASK_TYPES) {
       const li = document.createElement('li');
       li.textContent = (this.completedTypes.has(type) ? '✓ ' : '○ ') + type.charAt(0).toUpperCase() + type.slice(1);
       li.className = this.completedTypes.has(type) ? 'done' : '';
@@ -38,53 +49,92 @@ export class HUD {
     }
   }
 
-  update(timeLeft, taskManager, player, input) {
-    // Timer.
-    if (this.timerEl) {
-      const m = Math.floor(timeLeft / 60);
-      const s = Math.floor(timeLeft % 60);
-      this.timerEl.textContent = `${m}:${String(s).padStart(2, '0')}`;
-      this.timerEl.className = timeLeft < 60 ? 'danger' : '';
-    }
+  // Short message in the prompt slot (overrides the interaction prompt while it lasts).
+  flash(text, seconds = 2) {
+    this.flashText = text;
+    this.flashTime = seconds;
+  }
 
-    // Tab toggles checklist.
+  showNote(index, collected) {
+    const note = NOTES[index];
+    this.noteEl.querySelector('.note-number').textContent = `note ${index + 1} of ${NOTES.length} · ${collected}/${NOTES.length} found`;
+    this.noteEl.querySelector('.note-title').textContent = note.title;
+    this.noteEl.querySelector('.note-body').textContent = note.body;
+    this.noteEl.classList.remove('hidden');
+  }
+
+  hideNote() {
+    this.noteEl.classList.add('hidden');
+  }
+
+  // s: { timeLeft, taskManager, player, input, prompt, bottles }
+  update(dt, s) {
+    const { timeLeft, taskManager, player, input } = s;
+    this.timerEl.textContent = fmtTime(timeLeft);
+    this.timerEl.className = timeLeft < 60 ? 'danger' : '';
+
     if (input.wasPressed('Tab')) {
       this.checklistVisible = !this.checklistVisible;
-      if (this.checklistPanel) this.checklistPanel.classList.toggle('hidden', !this.checklistVisible);
+      this.checklistPanel.classList.toggle('hidden', !this.checklistVisible);
     }
 
-    // Breaker progress.
-    const breaker = taskManager?.activeTask?.type === 'breaker' ? taskManager.activeTask : null;
-    if (this.breakerTrackEl) {
-      if (breaker) {
-        this.breakerTrackEl.classList.remove('hidden');
-        if (this.breakerBarEl) this.breakerBarEl.style.width = `${breaker.progress * 100}%`;
-      } else {
-        this.breakerTrackEl.classList.add('hidden');
-      }
-    }
+    const breaker = taskManager.activeTask?.type === 'breaker' ? taskManager.activeTask : null;
+    this.breakerTrackEl.classList.toggle('hidden', !breaker);
+    if (breaker) this.breakerBarEl.style.width = `${breaker.progress * 100}%`;
 
-    // Carry indicator.
-    if (this.carryEl) {
-      this.carryEl.classList.toggle('hidden', !taskManager?.carrying);
-    }
+    this.staminaTrackEl.classList.toggle('hidden', player.stamina >= 1);
+    this.staminaTrackEl.classList.toggle('exhausted', player.exhausted);
+    this.staminaBarEl.style.width = `${player.stamina * 100}%`;
+
+    this.carryEl.classList.toggle('hidden', !taskManager.carrying);
+    this.bottlesEl.classList.toggle('hidden', s.bottles === 0);
+    this.bottlesEl.textContent = `water ×${s.bottles} · R to drink`;
+
+    this.flashTime -= dt;
+    const text = this.flashTime > 0 ? this.flashText : s.prompt ?? '';
+    if (this.promptEl.textContent !== text) this.promptEl.textContent = text;
   }
 }
 
-export function showEndScreen(detail, seed, player) {
-  const panel = document.getElementById('end-screen');
-  if (!panel) return;
+// stats: { won, cause, difficulty, timeLeft, survived, tasks, walked, chalk, bottlesFound, bottlesDrunk,
+//          notesRead, newNotes, notesTotal, chases, closest, seed }
+export function showEndScreen(stats) {
+  const panel = $('end-screen');
   panel.classList.remove('hidden');
-  const won = detail.won;
-  panel.querySelector('.end-result').textContent = won ? 'ESCAPED' : 'FAILED';
-  panel.querySelector('.end-time').textContent = `Time left: ${Math.floor(detail.timeLeft)}s`;
-  panel.querySelector('.end-walked').textContent = `Distance: ${player.distanceWalked.toFixed(0)} m`;
-  panel.querySelector('.end-seed').textContent = `Seed: ${seed}`;
-  panel.querySelector('.end-tasks').textContent = `Tasks: ${detail.tasks || 0}/4`;
-  panel.querySelector('[data-restart-same]')?.addEventListener('click', () => {
-    location.href = `?seed=${seed}`;
-  });
-  panel.querySelector('[data-restart-new]')?.addEventListener('click', () => {
+  const titles = { escaped: 'ESCAPED', caught: 'CAUGHT', time: 'LIGHTS OUT' };
+  const reasons = {
+    escaped: 'you found the door.',
+    caught: 'it found you first.',
+    time: 'the hum stopped. so did you.',
+  };
+  panel.querySelector('.end-result').textContent = titles[stats.cause];
+  panel.querySelector('.end-reason').textContent = reasons[stats.cause];
+  const rows = [
+    ['difficulty', stats.difficulty],
+    ['time survived', fmtTime(stats.survived)],
+    ['time left', fmtTime(stats.timeLeft)],
+    ['tasks', `${stats.tasks.length}/${TASK_TYPES.length}${stats.tasks.length ? ` (${stats.tasks.join(', ')})` : ''}`],
+    ['distance walked', `${stats.walked.toFixed(0)} m`],
+    ['chalk marks', stats.chalk],
+    ['water', `${stats.bottlesDrunk} drunk · ${stats.bottlesFound} found`],
+    ['notes', `${stats.notesRead} read${stats.newNotes ? ` (${stats.newNotes} new)` : ''} · ${stats.notesTotal}/${NOTES.length} collected`],
+    ['times chased', stats.chases],
+    ['closest call', stats.closest === null ? 'it never came' : `${stats.closest.toFixed(1)} m`],
+    ['seed', stats.seed],
+  ];
+  const dl = panel.querySelector('.end-stats');
+  dl.innerHTML = '';
+  for (const [k, v] of rows) {
+    const dt = document.createElement('dt');
+    dt.textContent = k;
+    const dd = document.createElement('dd');
+    dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  panel.querySelector('[data-restart-same]').onclick = () => {
+    location.href = `?seed=${stats.seed}`;
+  };
+  panel.querySelector('[data-restart-new]').onclick = () => {
     location.href = location.pathname;
-  });
+  };
 }

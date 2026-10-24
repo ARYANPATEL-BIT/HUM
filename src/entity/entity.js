@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CONFIG } from '../config.js';
 import { CollisionWorld } from '../player/collision.js';
 import { playEntityFootstep, updateEntityAudio, initEntityAudio, rebaseEntityAudio } from '../audio/entity.js';
@@ -9,7 +10,10 @@ import { playEntityFootstep, updateEntityAudio, initEntityAudio, rebaseEntityAud
 // recomputed at pathRecomputeHz) and collides with walls like the player.
 // LoS: ray-march through the collider grid (ChunkManager.hasLineOfSight).
 
+// Colour is linear (≈ 0.04–0.08 on screen) and goes through three's colourspace + fog chunks, so the
+// figure looks the same with or without the post pass and fades into the fog like the walls.
 const JITTER_VERT = /* glsl */`
+  #include <fog_pars_vertex>
   uniform float time;
   uniform float jitterAmt;
   varying vec3 vNormal;
@@ -18,14 +22,20 @@ const JITTER_VERT = /* glsl */`
     vec3 p = position;
     p.x += sin(p.y * 3.0 + time * 4.0) * jitterAmt;
     p.z += cos(p.y * 2.7 + time * 3.7) * jitterAmt;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+    vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    #include <fog_vertex>
   }
 `;
 const JITTER_FRAG = /* glsl */`
+  #include <common>
+  #include <fog_pars_fragment>
   varying vec3 vNormal;
   void main() {
     float d = dot(normalize(vNormal), vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
-    gl_FragColor = vec4(vec3(0.04 + d * 0.04), 1.0);
+    gl_FragColor = vec4(vec3(0.003 + d * 0.004), 1.0);
+    #include <colorspace_fragment>
+    #include <fog_fragment>
   }
 `;
 
@@ -45,10 +55,8 @@ export class Entity {
     this.material = new THREE.ShaderMaterial({
       vertexShader: JITTER_VERT,
       fragmentShader: JITTER_FRAG,
-      uniforms: {
-        time: { value: 0 },
-        jitterAmt: { value: 0.02 },
-      },
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { time: { value: 0 }, jitterAmt: { value: 0.02 } }]),
+      fog: true,
       side: THREE.DoubleSide,
     });
 
@@ -81,11 +89,10 @@ export class Entity {
       new THREE.BoxGeometry(0.12, 0.85, 0.14).translate(-0.1, 0.45, 0),
       new THREE.BoxGeometry(0.12, 0.85, 0.14).translate(0.1, 0.45, 0),
     ];
-    const group = new THREE.Group();
-    for (const geo of parts) {
-      group.add(new THREE.Mesh(geo, this.material));
-    }
-    return group;
+    // One geometry (one draw call); the jitter shader works on these merged positions unchanged.
+    const geo = mergeGeometries(parts);
+    parts.forEach((p) => p.dispose());
+    return new THREE.Mesh(geo, this.material);
   }
 
   // Put the entity at the centre of the cell containing (x, z) and drop its path.
