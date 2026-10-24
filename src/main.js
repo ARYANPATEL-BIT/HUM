@@ -12,14 +12,18 @@ import { ChunkManager } from './world/chunkManager.js';
 import { LightPool } from './world/lighting.js';
 import { Menus, isTouchOnlyDevice } from './ui/menus.js';
 import { HUD, showEndScreen } from './ui/hud.js';
+import { loadSettings, SettingsPanel } from './ui/settings.js';
 import { TaskObjects } from './world/taskObjects.js';
+import { Pickups } from './world/pickups.js';
+import { Chalk } from './world/chalk.js';
 import { TaskManager } from './tasks/taskManager.js';
 import { Entity } from './entity/entity.js';
 import { noiseEvents } from './entity/noiseEvents.js';
-import { initAudio, isReady } from './audio/audio.js';
+import { initAudio, isReady, resumeAudio, setMasterVolume } from './audio/audio.js';
 import { initHum, updateHumPanners, updateListener, setHumPitch, triggerCrackle, rebaseHumPanners } from './audio/hum.js';
-import { updateFootsteps } from './audio/footsteps.js';
+import { playFootstep } from './audio/footsteps.js';
 import { updateTaskAudio, rebaseTaskAudio } from './audio/tasks.js';
+import { playChalk, playDrink, playPaper } from './audio/items.js';
 
 const menus = new Menus(document.getElementById('overlay'));
 
@@ -33,9 +37,19 @@ function boot() {
   const seed = resolveSeed();
   document.getElementById('seed').textContent = seed;
 
+  const settings = loadSettings(); // before the renderer: the saved preset decides antialiasing
   const gfx = createRenderer(document.getElementById('app'));
   const A = CONFIG.atmosphere;
   gfx.scene.add(new THREE.HemisphereLight(A.hemi.sky, A.hemi.ground, A.hemi.intensity));
+
+  new SettingsPanel(document.querySelector('[data-screen="settings"]'), settings, {
+    preset: (name) => gfx.setPreset(name),
+    fov: (deg) => {
+      gfx.camera.fov = deg;
+      gfx.camera.updateProjectionMatrix();
+    },
+    volume: setMasterVolume,
+  });
 
   const input = new Input(gfx.renderer.domElement);
   const assets = createAssets(gfx.renderer);
@@ -47,19 +61,47 @@ function boot() {
   const collision = new CollisionWorld(chunks);
   const player = new PlayerController(gfx.camera, input, collision, (x, z) => chunks.groundAt(x, z));
 
-  // Task system.
+  // Task objects first so pickups can stay off their cells.
   const taskObjects = new TaskObjects(seed, chunks.size, assets);
-  chunks.onChunkLoaded = (chunk) => taskObjects.placeChunk(chunk, player.position);
-  chunks.onChunkUnloaded = (key, chunk) => taskObjects.unplaceChunk(key, chunk);
+  const pickups = new Pickups(seed, assets);
+  chunks.onChunkLoaded = (chunk) => {
+    taskObjects.placeChunk(chunk, player.position);
+    pickups.placeChunk(chunk);
+  };
+  chunks.onChunkUnloaded = (key, chunk) => {
+    taskObjects.unplaceChunk(key, chunk);
+    pickups.unplaceChunk(chunk);
+  };
+  const chalk = new Chalk(gfx.scene, chunks, assets);
 
   const taskManager = new TaskManager(gfx.scene, chunks, taskObjects, seed, player);
   taskManager.lightPool = lightPool;
+  taskManager.pickups = pickups;
+
+  const hud = new HUD();
+  hud.refreshChecklist();
+
+  taskManager.onPickup = (type) => {
+    if (type === 'note') {
+      playPaper();
+      hud.showNote(pickups.reading, pickups.read.size);
+    } else {
+      hud.flash(`water ×${pickups.bottles} · R to drink`);
+    }
+  };
+  const closeNote = () => {
+    pickups.reading = null;
+    hud.hideNote();
+  };
 
   // Difficulty picker (title screen). The click then bubbles to the overlay and starts the game.
+  let difficulty = 'normal';
   document.querySelectorAll('[data-difficulty]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      CONFIG.game.timer = CONFIG.game.timers[btn.dataset.difficulty];
-      if (btn.dataset.difficulty === 'hard') CONFIG.entity.spawnDelay = 0;
+      if (!game.is('title')) return;
+      difficulty = btn.dataset.difficulty;
+      CONFIG.game.timer = CONFIG.game.timers[difficulty];
+      if (difficulty === 'hard') CONFIG.entity.spawnDelay = 0;
       taskManager.timeLeft = CONFIG.game.timer;
     });
   });
@@ -79,9 +121,6 @@ function boot() {
     if (game.is('playing') && !input.locked && !taskManager.overlayOpen) game.set('paused');
   };
 
-  const hud = new HUD();
-  hud.refreshChecklist();
-
   // Entity.
   const entity = new Entity(gfx.scene, chunks);
   let entitySpawnTimer = 0;
@@ -92,9 +131,14 @@ function boot() {
     return 1 - Math.max(0, taskManager.timeLeft / CONFIG.game.timer);
   }
 
+  // Run stats for the end screen.
+  const run = { survived: 0, chases: 0, closest: null, lastEntityState: null };
+
   // Rebase listeners.
   chunks.onRebase((dx, dz) => {
     taskObjects.rebase(dx, dz);
+    pickups.rebase(dx, dz);
+    chalk.rebase(dx, dz);
     taskManager.rebase(dx, dz);
     entity.rebase(dx, dz);
     rebaseTaskAudio(dx, dz);
@@ -109,6 +153,7 @@ function boot() {
   if (import.meta.env.DEV) {
     import('./core/devTools.js').then(({ DevTools }) => {
       dev = new DevTools(gfx, player, chunks, input, lightPool, entity);
+      Object.assign(window.hum, { taskManager, taskObjects, pickups, chalk, entity, game, input });
       // Extend dev update for entity / task dev keys.
       const baseUpdate = dev.update.bind(dev);
       dev.update = (dt) => {
@@ -133,23 +178,27 @@ function boot() {
     });
   }
 
-  // Win/lose events.
+  // Win/lose.
   document.addEventListener('game-end', (e) => {
     game.set('end');
+    closeNote();
     document.exitPointerLock(); // free the cursor for the end-screen buttons
-    showEndScreen(
-      { ...e.detail, tasks: taskManager.completedTypes.size },
+    showEndScreen({
+      cause: e.detail.cause,
+      difficulty,
+      survived: run.survived,
+      timeLeft: taskManager.timeLeft,
+      tasks: [...taskManager.completedTypes],
+      walked: player.distanceWalked,
+      chalk: chalk.placed,
+      ...pickups.stats,
+      notesTotal: pickups.read.size,
+      chases: run.chases,
+      closest: run.closest,
       seed,
-      player
-    );
+    });
   });
-  document.addEventListener('entity-caught', () => {
-    if (!taskManager.won && !taskManager.lost) {
-      taskManager.lost = true;
-      taskManager.timerRunning = false;
-      document.dispatchEvent(new CustomEvent('game-end', { detail: { won: false, timeLeft: 0, tasks: taskManager.completedTypes.size } }));
-    }
-  });
+  document.addEventListener('entity-caught', () => taskManager.caught());
 
   const game = new StateMachine({
     title: { enter: () => menus.show('title') },
@@ -157,15 +206,15 @@ function boot() {
     playing: {
       enter: () => {
         menus.hide();
+        // A menu button keeps focus after the click that started play; Space/Enter would press it again.
+        document.activeElement?.blur();
         taskManager.start();
-        // Init audio on first click.
-        if (!isReady()) {
-          initAudio();
-          initHum(CONFIG.lighting.poolSize);
-        }
+        initAudio(); // both are no-ops after the first time
+        initHum(CONFIG.lighting.poolSize);
       },
       update: (dt) => {
         const p = pressure();
+        run.survived += dt;
 
         // Esc inside a task overlay (pointer already unlocked): close it and pause.
         if (taskManager.overlayOpen && input.wasPressed('Escape')) {
@@ -174,12 +223,40 @@ function boot() {
           return;
         }
 
+        // Reading a note: E puts it down (and doesn't also interact this frame).
+        const reading = pickups.reading !== null;
+        if (reading && input.wasPressed('KeyE')) {
+          closeNote();
+          input.pressed.delete('KeyE');
+        }
+        player.frozen = pickups.reading !== null;
+        taskManager.holdTimer = player.frozen;
+
         // Cassette blocks sprint.
         player.canSprint = !taskManager.carrying;
 
         if (!taskManager.overlayOpen) player.update(dt);
+        if (player.stepped && isReady()) playFootstep(player.sprinting);
         chunks.update(player.position);
         lightPool.update(dt, gfx.camera, p); // pressure: shorter flicker gaps, more dead panels
+
+        // Chalk (Q) and water (R).
+        chalk.update(dt);
+        if (!taskManager.overlayOpen && !player.frozen) {
+          if (input.wasPressed('KeyQ')) {
+            if (chalk.place(gfx.camera, player.yaw)) playChalk();
+            else if (chalk.cooldown === 0) hud.flash('nothing to draw on here');
+          }
+          if (input.wasPressed('KeyR')) {
+            if (pickups.drink()) {
+              player.refillStamina();
+              playDrink();
+              hud.flash(pickups.bottles ? `water ×${pickups.bottles} left` : 'that was the last bottle');
+            } else {
+              hud.flash('no water');
+            }
+          }
+        }
 
         // Noise events from sprinting.
         if (player.sprinting && player.speed > 2) {
@@ -209,6 +286,10 @@ function boot() {
 
         if (entity.enabled) {
           entity.update(dt, player.position, gfx.camera, p, noiseEvents);
+          const d = entity.position.distanceTo(player.position);
+          run.closest = Math.min(run.closest ?? Infinity, d);
+          if (entity.state === 'chase' && run.lastEntityState !== 'chase') run.chases++;
+          run.lastEntityState = entity.state;
         } else {
           noiseEvents.flush(); // nobody is listening; don't let events pile up
         }
@@ -229,11 +310,17 @@ function boot() {
         if (isReady()) {
           updateHumPanners(lightPool.lights);
           updateListener(gfx.camera);
-          updateFootsteps(dt, player.speed, player.sprinting);
-          updateTaskAudio(taskObjects.active, player.position);
+          updateTaskAudio(taskManager.pending, player.position);
         }
 
-        hud.update(taskManager.timeLeft, taskManager, player, input);
+        hud.update(dt, {
+          timeLeft: taskManager.timeLeft,
+          taskManager,
+          player,
+          input,
+          bottles: pickups.bottles,
+          prompt: player.frozen ? null : taskManager.promptFor(player),
+        });
       },
     },
     end: {
@@ -244,9 +331,13 @@ function boot() {
   });
   game.set('title');
 
-  menus.onClick(() => {
-    if (game.is('title') || game.is('paused')) input.requestLock();
+  // Title: only the difficulty buttons start. Paused: a click anywhere but a button resumes.
+  menus.onClick((e) => {
+    if (menus.current === 'title' && e.target.closest('[data-difficulty]')) input.requestLock();
+    if (menus.current === 'paused' && !e.target.closest('button')) input.requestLock();
   });
+  document.addEventListener('click', resumeAudio);
+  document.addEventListener('keydown', resumeAudio);
   input.onLockChange = (locked) => {
     if (locked) game.set('playing');
     else if (game.is('playing') && !taskManager.overlayOpen) game.set('paused');
