@@ -27,7 +27,7 @@ export function createAssets(renderer) {
       panel: panelGeometry(),
       chair: chairGeometry(),
     },
-    // Task objects, tape players and the exit door. One geometry + material per type, shared by every instance.
+    // Task objects, tape players, the exit door, bottles and notes. One geometry + material per type, shared by every instance.
     props: {
       geometries: propGeometries(),
       materials: Object.fromEntries(
@@ -58,6 +58,8 @@ function propGeometries() {
     keypad: merge([new THREE.BoxGeometry(0.12, 1.2, 0.12).translate(0, 0.6, 0), new THREE.BoxGeometry(0.3, 0.4, 0.1).translate(0, 1.35, 0)]),
     exit: new THREE.BoxGeometry(1.2, 2.2, 0.12).translate(0, 1.1, 0),
     code: new THREE.PlaneGeometry(1, 0.25),
+    bottle: merge([new THREE.CylinderGeometry(0.045, 0.045, 0.2, 10).translate(0, 0.1, 0), new THREE.CylinderGeometry(0.018, 0.03, 0.06, 8).translate(0, 0.23, 0)]),
+    note: new THREE.BoxGeometry(0.21, 0.004, 0.29).translate(0, 0.004, 0),
   };
 }
 
