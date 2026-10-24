@@ -121,3 +121,12 @@ tests/                 world.test.mjs (generation, seams, connectivity, streamin
 One-time setup in the GitHub repo: **Settings → Pages → Build and deployment → Source: GitHub
 Actions**. The build uses relative asset paths (`base: './'` in `vite.config.js`), so it works at
 any repo path without changes.
+
+
+
+## Creator Note
+
+made for fun and to be honest i just vibecoded the entire thing so i do not know how things are happening haahahaha
+
+
+and i do not care as well
