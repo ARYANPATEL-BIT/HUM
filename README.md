@@ -38,11 +38,18 @@ You also have:
 
 - **Chalk (Q):** mark the wall you're looking at with an X, or the floor with an arrow pointing where you face.
 - **Water (E to pick up, R to drink):** sprinting drains stamina. A bottle refills it. You can carry three.
+- **Hiding (hold C):** some rooms have office desks and tall cupboards. Hold C at one to crawl under
+  or step inside; let go to come out. It can't see you in there, unless it was chasing you from close
+  by when you got in. If it lost you, it may still come and check where it last saw you. After about
+  20 s your breathing gets loud, and it can hear that.
+- **Photo mode (P):** freezes the game and hides the HUD. Look around with the mouse; S saves a PNG.
 - **Notes (E):** 15 handwritten notes are scattered around. Each one you find is the next one you
   haven't read, so the story reads in order across runs. Progress is saved in your browser.
 
 The end screen shows how you did: time survived, tasks, distance, chalk marks, water, notes, how
-many times you were chased and your closest call. "Retry same seed" replays the exact same level.
+many times you were chased and your closest call. A map of the run shows the halls you went through,
+your path, its path, finished tasks, chalk marks and where it ended. "save map" downloads it as a PNG.
+"Retry same seed" replays the exact same level.
 
 ### Controls
 
@@ -54,7 +61,9 @@ many times you were chased and your closest call. "Retry same seed" replays the 
 | E | interact / pick up / put a note down (hold on the breaker) |
 | Q | chalk mark |
 | R | drink water |
+| C (hold) | hide at a desk or cupboard |
 | Tab | task checklist |
+| P | photo mode (S saves a PNG) |
 | Esc | pause |
 
 ### Settings
@@ -102,15 +111,17 @@ src/
   config.js            every tuning value (units: meters, seconds)
   content/notes.js     the 15 notes
   core/                renderer + post, loop, input, RNG, storage, dev tools
-  player/              first-person controller (stamina, head bob, steps), collision
+  player/              first-person controller (stamina, head bob, steps), collision, hiding
   world/               chunk generation/building/streaming, lighting, textures,
                        task objects, pickups (bottles, notes), chalk
   tasks/               breaker, radio, keypad, task manager (interaction, win/lose)
   entity/              the entity (A* pathing, hearing, chase) and noise events
   audio/               hum, footsteps, task voices, entity, item sounds
-  ui/                  menus, settings, HUD, end screen
+  ui/                  menus, settings, HUD, end screen, recap map
 tests/                 world.test.mjs (generation, seams, connectivity, streaming, collision)
                        items.test.mjs (pickups, notes, stamina, steps, head bob, settings)
+                       recap.test.mjs (path sampling in world coordinates across rebases)
+                       hiding.test.mjs (spot placement, entity rules, chase simulation)
 ```
 
 ## Deploying
