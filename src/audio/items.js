@@ -55,6 +55,13 @@ export function playDrink() {
   }
 }
 
+// One breath while hiding: slow inhale, longer lower exhale (half-speed noise so it lasts the second).
+export function playBreath(gain) {
+  if (!isReady()) return;
+  burst({ type: 'bandpass', freq: 1100, q: 0.7, gain, attack: 0.55, length: 0.85, rate: 0.5 });
+  burst({ type: 'bandpass', freq: 650, q: 0.8, gain: gain * 1.2, attack: 0.15, length: 1.0, offset: 1.0, rate: 0.5 });
+}
+
 // Paper rustle.
 export function playPaper() {
   if (!isReady()) return;
