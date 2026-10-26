@@ -14,6 +14,7 @@ export function createAssets(renderer) {
       ceiling: new THREE.MeshLambertMaterial({ map: tex.ceiling, vertexColors: true }),
       panel: new THREE.MeshBasicMaterial({ color: 0xffffff }), // per-instance colour; emissive appearance
       chair: new THREE.MeshLambertMaterial({ color: col.chair }),
+      hiding: new THREE.MeshLambertMaterial({ color: col.furniture, side: THREE.DoubleSide }), // seen from inside too
       water: new THREE.MeshStandardMaterial({
         color: col.water,
         roughness: 0.08,
@@ -26,6 +27,7 @@ export function createAssets(renderer) {
     geometries: {
       panel: panelGeometry(),
       chair: chairGeometry(),
+      ...hidingGeometries(),
     },
     // Task objects, tape players, the exit door, bottles and notes. One geometry + material per type, shared by every instance.
     props: {
@@ -67,6 +69,30 @@ function propGeometries() {
 export function panelGeometry() {
   const [w, d] = CONFIG.world.panelSize;
   return new THREE.PlaneGeometry(w, d).rotateX(Math.PI / 2);
+}
+
+// Hiding spots, origin on the floor at the centre, front facing +Z. Sizes from CONFIG.hiding.
+export function hidingGeometries() {
+  const t = 0.03;
+  const [dw, dh, dd] = CONFIG.hiding.desk.size;
+  const desk = merge([
+    new THREE.BoxGeometry(dw, t, dd).translate(0, dh - t / 2, 0),
+    new THREE.BoxGeometry(t, dh - t, dd).translate(-(dw - t) / 2, (dh - t) / 2, 0),
+    new THREE.BoxGeometry(t, dh - t, dd).translate((dw - t) / 2, (dh - t) / 2, 0),
+    new THREE.BoxGeometry(dw - 2 * t, 0.4, t).translate(0, dh - t - 0.25, -dd / 2 + 0.05),
+  ]);
+  const { size: [cw, ch, cd], slit } = CONFIG.hiding.cupboard;
+  const door = (cw - slit) / 2;
+  const cupboard = merge([
+    new THREE.BoxGeometry(cw, ch, t).translate(0, ch / 2, -(cd - t) / 2),
+    new THREE.BoxGeometry(t, ch, cd).translate(-(cw - t) / 2, ch / 2, 0),
+    new THREE.BoxGeometry(t, ch, cd).translate((cw - t) / 2, ch / 2, 0),
+    new THREE.BoxGeometry(cw, t, cd).translate(0, ch - t / 2, 0),
+    new THREE.BoxGeometry(cw, t, cd).translate(0, 0.06, 0),
+    new THREE.BoxGeometry(door, ch - 2 * t, t).translate(-(slit + door) / 2, ch / 2, (cd - t) / 2),
+    new THREE.BoxGeometry(door, ch - 2 * t, t).translate((slit + door) / 2, ch / 2, (cd - t) / 2),
+  ]);
+  return { desk, cupboard };
 }
 
 // Office chair from primitives, origin at the floor under the stem. Proportions are model data.
