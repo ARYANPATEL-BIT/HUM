@@ -1,11 +1,13 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CONFIG } from '../config.js';
 import { hash, mulberry32 } from '../core/rng.js';
 import { CELL_NO_FLOOR, CELL_TALL, chunkHeightAt } from './chunkGen.js';
 import { GeoBuilder } from './geoBuilder.js';
 
 // Turns chunk layout data into meshes (chunk-local coords) + collision boxes.
-// Draw calls per chunk: walls, floor, ceiling, panels (+ water or chairs in some landmarks).
+// Draw calls per chunk: walls, floor, ceiling, panels (+ water or chairs in some landmarks, + desks and
+// cupboards in ~1 of 3 ordinary chunks).
 
 const BUILD_SALT = 5;
 const TINT_SALT = 6;
@@ -172,6 +174,16 @@ export function buildChunk(data, assets) {
     group.add(chairs);
     const r = CONFIG.landmarks.chairs.pileRadius;
     for (const p of data.landmark.piles) colliders.push({ minX: p.x - r, minZ: p.z - r, maxX: p.x + r, maxZ: p.z + r });
+  }
+
+  // Desks and cupboards: one merged mesh per chunk, box colliders.
+  if (data.hiding.length) {
+    const parts = data.hiding.map((s) => assets.geometries[s.type].clone().rotateY(s.yaw).translate(s.x, 0, s.z));
+    const geo = mergeGeometries(parts);
+    parts.forEach((p) => p.dispose());
+    owned.push(geo);
+    group.add(new THREE.Mesh(geo, M.hiding));
+    for (const s of data.hiding) colliders.push({ minX: s.x - s.hx, minZ: s.z - s.hz, maxX: s.x + s.hx, maxZ: s.z + s.hz });
   }
 
   return {
