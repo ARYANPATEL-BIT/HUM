@@ -96,6 +96,13 @@ export class HUD {
   }
 }
 
+export function saveImage(dataURL, filename) {
+  const a = document.createElement('a');
+  a.href = dataURL;
+  a.download = filename;
+  a.click();
+}
+
 // stats: { won, cause, difficulty, timeLeft, survived, tasks, walked, chalk, bottlesFound, bottlesDrunk,
 //          notesRead, newNotes, notesTotal, chases, closest, seed }
 export function showEndScreen(stats) {
@@ -131,6 +138,9 @@ export function showEndScreen(stats) {
     dd.textContent = v;
     dl.append(dt, dd);
   }
+  panel.querySelector('[data-save-map]').onclick = () => {
+    saveImage($('end-map').toDataURL('image/png'), `hum-map-${stats.seed}.png`);
+  };
   panel.querySelector('[data-restart-same]').onclick = () => {
     location.href = `?seed=${stats.seed}`;
   };
