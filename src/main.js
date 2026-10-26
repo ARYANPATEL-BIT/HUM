@@ -11,11 +11,13 @@ import { createAssets } from './world/assets.js';
 import { ChunkManager } from './world/chunkManager.js';
 import { LightPool } from './world/lighting.js';
 import { Menus, isTouchOnlyDevice } from './ui/menus.js';
-import { HUD, showEndScreen } from './ui/hud.js';
+import { HUD, showEndScreen, saveImage } from './ui/hud.js';
+import { Recap } from './ui/recap.js';
 import { loadSettings, SettingsPanel } from './ui/settings.js';
 import { TaskObjects } from './world/taskObjects.js';
 import { Pickups } from './world/pickups.js';
 import { Chalk } from './world/chalk.js';
+import { Hiding } from './player/hiding.js';
 import { TaskManager } from './tasks/taskManager.js';
 import { Entity } from './entity/entity.js';
 import { noiseEvents } from './entity/noiseEvents.js';
@@ -73,6 +75,7 @@ function boot() {
     pickups.unplaceChunk(chunk);
   };
   const chalk = new Chalk(gfx.scene, chunks, assets);
+  const hiding = new Hiding(chunks);
 
   const taskManager = new TaskManager(gfx.scene, chunks, taskObjects, seed, player);
   taskManager.lightPool = lightPool;
@@ -133,12 +136,15 @@ function boot() {
 
   // Run stats for the end screen.
   const run = { survived: 0, chases: 0, closest: null, lastEntityState: null };
+  const recap = new Recap(chunks);
+  document.addEventListener('task-complete', (e) => recap.mark(e.detail.type, player.position));
 
   // Rebase listeners.
   chunks.onRebase((dx, dz) => {
     taskObjects.rebase(dx, dz);
     pickups.rebase(dx, dz);
     chalk.rebase(dx, dz);
+    hiding.rebase(dx, dz);
     taskManager.rebase(dx, dz);
     entity.rebase(dx, dz);
     rebaseTaskAudio(dx, dz);
@@ -153,7 +159,7 @@ function boot() {
   if (import.meta.env.DEV) {
     import('./core/devTools.js').then(({ DevTools }) => {
       dev = new DevTools(gfx, player, chunks, input, lightPool, entity);
-      Object.assign(window.hum, { taskManager, taskObjects, pickups, chalk, entity, game, input });
+      Object.assign(window.hum, { taskManager, taskObjects, pickups, chalk, entity, game, input, recap, hiding });
       // Extend dev update for entity / task dev keys.
       const baseUpdate = dev.update.bind(dev);
       dev.update = (dt) => {
@@ -183,6 +189,7 @@ function boot() {
     game.set('end');
     closeNote();
     document.exitPointerLock(); // free the cursor for the end-screen buttons
+    recap.sample(player.position, entity); // the exact end point
     showEndScreen({
       cause: e.detail.cause,
       difficulty,
@@ -197,12 +204,25 @@ function boot() {
       closest: run.closest,
       seed,
     });
+    recap.draw(document.getElementById('end-map'), seed, e.detail.cause, chalk.positions());
   });
   document.addEventListener('entity-caught', () => taskManager.caught());
 
+  let photo = false;
+  const setPhoto = (on) => {
+    photo = on;
+    document.getElementById('hud').classList.toggle('hidden', on);
+  };
+  // Draw a frame and read it back in the same task: the drawing buffer is only cleared after the
+  // browser composites, so this works without preserveDrawingBuffer.
+  const savePhoto = () => {
+    gfx.render(0);
+    saveImage(gfx.renderer.domElement.toDataURL('image/png'), `hum-${seed}-${Date.now()}.png`);
+  };
+
   const game = new StateMachine({
     title: { enter: () => menus.show('title') },
-    paused: { enter: () => { menus.show('paused'); taskManager.pause(); } },
+    paused: { enter: () => { setPhoto(false); menus.show('paused'); taskManager.pause(); } },
     playing: {
       enter: () => {
         menus.hide();
@@ -213,8 +233,19 @@ function boot() {
         initHum(CONFIG.lighting.poolSize);
       },
       update: (dt) => {
+        // Photo mode (P): everything stops but mouse look; S saves the view.
+        if (input.wasPressed('KeyP') && (photo || (!taskManager.overlayOpen && pickups.reading === null))) setPhoto(!photo);
+        if (photo) {
+          player.look();
+          if (hiding.active) hiding.syncCamera(player, gfx.camera);
+          else player.syncCamera();
+          if (input.wasPressed('KeyS')) savePhoto();
+          return;
+        }
+
         const p = pressure();
         run.survived += dt;
+        recap.update(dt, player.position, entity);
 
         // Esc inside a task overlay (pointer already unlocked): close it and pause.
         if (taskManager.overlayOpen && input.wasPressed('Escape')) {
@@ -235,14 +266,29 @@ function boot() {
         // Cassette blocks sprint.
         player.canSprint = !taskManager.carrying;
 
-        if (!taskManager.overlayOpen) player.update(dt);
+        // Hiding: hold C at a desk or cupboard; letting go comes back out. No E/Q/R from inside.
+        const spot = hiding.active || taskManager.overlayOpen || player.frozen ? null : hiding.near(player.position);
+        if (hiding.active && !input.isDown('KeyC')) hiding.exit(player);
+        else if (spot && input.isDown('KeyC')) hiding.enter(spot, player, entity);
+        if (hiding.active) input.pressed.delete('KeyE');
+
+        if (hiding.active) {
+          player.look();
+          player.updateStamina(dt);
+          player.stepped = false;
+          hiding.update(dt, player, gfx.camera);
+        } else if (!taskManager.overlayOpen) {
+          player.update(dt);
+        } else {
+          player.stepped = false; // update() resets it; without this a step landing as E opened an overlay repeats every frame
+        }
         if (player.stepped && isReady()) playFootstep(player.sprinting);
         chunks.update(player.position);
         lightPool.update(dt, gfx.camera, p); // pressure: shorter flicker gaps, more dead panels
 
         // Chalk (Q) and water (R).
         chalk.update(dt);
-        if (!taskManager.overlayOpen && !player.frozen) {
+        if (!taskManager.overlayOpen && !player.frozen && !hiding.active) {
           if (input.wasPressed('KeyQ')) {
             if (chalk.place(gfx.camera, player.yaw)) playChalk();
             else if (chalk.cooldown === 0) hud.flash('nothing to draw on here');
@@ -264,7 +310,7 @@ function boot() {
         }
 
         // Breaker (no overlay).
-        taskManager.updateBreaker(dt, player, input);
+        if (!hiding.active) taskManager.updateBreaker(dt, player, input);
 
         taskManager.update(dt, player, input);
 
@@ -285,7 +331,7 @@ function boot() {
         }
 
         if (entity.enabled) {
-          entity.update(dt, player.position, gfx.camera, p, noiseEvents);
+          entity.update(dt, player.position, gfx.camera, p, noiseEvents, hiding);
           const d = entity.position.distanceTo(player.position);
           run.closest = Math.min(run.closest ?? Infinity, d);
           if (entity.state === 'chase' && run.lastEntityState !== 'chase') run.chases++;
@@ -319,7 +365,9 @@ function boot() {
           player,
           input,
           bottles: pickups.bottles,
-          prompt: player.frozen ? null : taskManager.promptFor(player),
+          prompt: player.frozen ? null
+            : hiding.active ? 'let go of C to come out'
+            : taskManager.promptFor(player) ?? (spot && `[C] hold to hide ${spot.type === 'desk' ? 'under the desk' : 'in the cupboard'}`),
         });
       },
     },
