@@ -125,6 +125,18 @@ export class Chalk {
     this.cooldown = CONFIG.chalk.cooldown;
   }
 
+  // Scene x, z of every mark still in the world, flat [x0, z0, x1, z1, …] (for the recap map).
+  positions() {
+    const out = [];
+    for (const mesh of [this.wall, this.floor]) {
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, _m);
+        out.push(_m.elements[12], _m.elements[14]);
+      }
+    }
+    return out;
+  }
+
   rebase(dx, dz) {
     for (const mesh of [this.wall, this.floor]) {
       for (let i = 0; i < mesh.count; i++) {
