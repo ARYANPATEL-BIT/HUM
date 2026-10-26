@@ -1,9 +1,11 @@
 # HUM – Progress Log
 
-Phase numbering follows SPEC.md (1 = player, 2 = world). **SPEC.md is still not in the repo** (checked
-2026-10-23), so phases 3–7 are named after their content. Phase 7's scope comes from the task list in
-the request (chalk, water, 15 notes, settings, head bob, end stats, Pages deploy, README, production
-cleanup); the details below are my design choices, not checked against a spec.
+Phase numbering follows the original spec (1 = player, 2 = world). That spec was never committed, so
+phases 3–7 are named after their content. Phase 7's scope came from the task list in that request
+(chalk, water, 15 notes, settings, head bob, end stats, Pages deploy, README, production cleanup); the
+details are my design choices, not checked against a spec.
+**SPEC.md now exists (2026-10-26)** but only covers phases 8–10 (recap map, photo mode, hiding), written
+as each was built.
 "Done" means wired in and reachable in a normal game, not just present in a file.
 
 | Phase | Status | Notes |
@@ -15,6 +17,99 @@ cleanup); the details below are my design choices, not checked against a spec.
 | 5 – Tasks, timer, win/lose | Done | Winnable without dev keys |
 | 6 – Entity + pressure | Done | A* movement with collision in every state |
 | 7 – Polish + ship | Done (automated checks only) | Needs a human playtest with mouse and sound |
+| 8 – Recap map | Done (automated checks only) | End-screen map + PNG save |
+| 9 – Photo mode | Done (automated checks only) | P / S |
+| 10 – Hiding spots | Done (automated checks only) | Escape rate tuned in a simulation, not by people |
+
+## Phases 8–10 (2026-10-26)
+
+### Fixes first
+The playtest-notes section of the request was the empty template again, so there were no human notes.
+A baseline bot run on the code as found (seed 777, normal, entity on) won with no errors. One bug
+found by reading the code and fixed:
+- **Footstep loop under task overlays.** `player.stepped` is only reset inside `player.update()`, which is
+  skipped while an overlay is open. If E opened the radio/keypad on the frame a foot landed, a footstep
+  played every frame until the overlay closed. The bot never hit it because it stops before pressing E.
+  `main.js` now clears `stepped` whenever the player isn't updated (overlay, hiding).
+
+### 8 – Recap map (`src/ui/recap.js`)
+- Samples every 0.5 s of play into two flat arrays of world meters (scene + origin chunk × size); the
+  entity array is index-aligned, `NaN, NaN` before it spawns. A final sample is taken at game end.
+  Task markers record the player's position on `task-complete`. `Chalk.positions()` gives the marks
+  still in the world (ring buffer: last 128 of each kind).
+- The end screen has a canvas next to the stats: walls, pillars and hiding spots of every chunk the
+  player stood in at a sample (regenerated with `generateChunk`), the entity path (red, gaps on jumps
+  > 8 m = relocation), the player path, start ring, task circles with the type's letter, chalk crosses,
+  red X (caught / lights out) or green square (exit), legend and seed drawn into the image. Longest
+  side 960 px. "save map (png)" downloads `hum-map-<seed>.png`.
+- Checked: `tests/recap.test.mjs` walks 1.5 km through the real ChunkManager across a rebase. Every
+  step between samples is 12.5 m ± 0.5 in world coordinates, the entity stays exactly 3 m behind, and
+  chunk indices come out global. In the browser: a 1 km noclip run crossed a rebase (origin moved to
+  chunk −7, 31), the path stayed continuous, and the PNG downloaded (50 KB). Bot wins show full maps.
+
+### 9 – Photo mode (`main.js`, `PlayerController.look()`)
+- P toggles (blocked under task overlays and the note reader). The playing update returns early after
+  mouse look, so timer, entity, lights, tasks, recap and the run clock all stop. `#hud` is hidden, and
+  the post pass keeps running. S calls `gfx.render(0)` then `canvas.toDataURL()` in the same task:
+  no `preserveDrawingBuffer`. Esc (lock lost) → normal pause, photo mode off. Works while hidden
+  (keeps the hiding camera).
+- Checked in the browser on low (no post) and high: timer, recap, entity and player frozen while W
+  is held; HUD hidden; look works; saved PNG is 1280×720, mean brightness 55 (low) / 45 (high), not
+  black; P ignored under the note and the radio overlay; Esc → paused with the HUD back.
+
+### 10 – Hiding spots (`chunkGen.placeHidingSpots`, `assets.hidingGeometries`, `src/player/hiding.js`, `entity.js`)
+- Placement is chunk data (own salt, so existing seeds keep their walls, tasks and pickups): 1 in
+  2.96 ordinary chunks over 2514 tested, 1–2 per chunk, desks and cupboards ~50/50. Each sits in its own
+  room cell, back to an existing wall, shifted along it. Tests check the cell centre and the open edge
+  midpoints stay clear (task props, entity A*), cupboards stay ≥ 0.5 m off the middle of the wall edge
+  (keypad codes), and the box stays inside its cell.
+- One merged mesh per chunk with spots (DoubleSide Lambert so the inside is visible) + box colliders.
+- Hold C within 1.3 m of a spot's front: the player is moved to the spot's centre, the camera goes under
+  the desk (0.5 m, set back so the desktop and side panels frame the view) or inside the cupboard
+  (1.55 m, looking through the door slit). Only mouse look works; E/Q/R and the breaker are blocked;
+  stamina regenerates. Letting go puts you back where you stood. Esc/pause clears held keys, so you
+  come out on resume.
+- Entity rules: no line of sight to a hidden player unless `hiding.found`. Found when (a) it was chasing
+  within 6 m as you hid; (b) a chase that lost you goes to where it last saw you, not your live
+  position, and on arrival, if you're within 3 m, it checks with `searchChance`, else it gives up
+  (LOSE → 10 s grace); (c) it investigates a noise within 3 m of you after you've been hidden > 20 s.
+  A found player is caught at 1.5 m, because the spot's colliders keep it 0.7–1.1 m away.
+- Breathing (filtered noise, `playBreath`): quiet every 3.4 s; from 20 s it ramps over 20 s to loud
+  every 2 s, and each breath emits a noise event of radius 4 → 12 m.
+- **Tuning.** `tests/hiding.test.mjs` simulates chases with the real Entity, PlayerController,
+  collision and Hiding code. The entity is chasing from 6–12 m with line of sight; the player runs
+  (70% sprint, 30% walk as if carrying the cassette) to a spot 6–24 m away and hides for 15 s; pressure
+  is random. Escape rate with `searchChance` 0.5: 36–48% over 4 seeds. With 0.35: 49–52%. Set to 0.35;
+  the test's fixed seed gives 47% (43/92: 30 spotted, 19 searched and found). In that sim 68/160
+  runs were caught before reaching a spot. This is a model of a player, not people; a human who
+  breaks line of sight before hiding always escapes, and one who hides in plain view at < 6 m never
+  does.
+- Checked in the browser: prompt "[C] hold to hide under the desk / in the cupboard", real C key enters,
+  W/E do nothing, camera at 0.5 / 1.55 m, release returns to the front point; through main.js, the entity
+  chasing from 5 m caught the player in 1.6 s, and from 10.2 m with the roll forced to fail it went
+  back to wander and the player was still hidden after 12 s.
+
+### Perf (desks/cupboards loaded)
+Production builds of HEAD and this change, same seed (4242), same deterministic 20 s walk-and-turn,
+headless Chrome, RTX 5070 Laptop GPU, 1280×720 at DPR 1.5, vsync off; two runs each, order swapped:
+
+| build | preset | draw calls avg (min–max) | avg fps | 1% low fps |
+|---|---|---|---|---|
+| HEAD | low | 47.9–48.0 (43–62) | 453–454 | 263 |
+| this | low | 49.9 (45–64) | 426–432 | 250–263 |
+| HEAD | high | 48.7–48.9 (44–63) | 442–445 | 270 |
+| this | high | 50.8 (46–65) | 408–426 | 244–256 |
+
++2 draw calls on this walk (+1 per chunk with spots that is in view). Triangles are negligible: a desk
+is 48 and a cupboard 84. FPS is 4–8% lower in both runs, about +0.13 ms a frame; I didn't profile which
+part (the extra draws, the per-frame `hiding.near` scan of loaded chunks, recap sampling). These
+numbers say nothing about integrated graphics.
+
+### Verification (2026-10-26)
+- `npm test` (world, items, recap, hiding) and `npm run build` pass after each feature and at the end.
+- Bot runs on the final code, entity on: won 777 normal, 31337 normal, 2024 hard; no page or console
+  errors, no stuck bots. The bot never hides and wasn't chased in these runs, so hiding vs the entity
+  in the real loop is covered only by the scripted browser check above and the Node simulation.
 
 ## Fixes before phase 7
 
@@ -108,3 +203,13 @@ Phases 1–6 were winnable as committed (normal, entity on and off). Found and f
 - Chalk marks near a wall's end can overhang the edge by up to ~0.2 m.
 - Hard + carrying the cassette (no sprint) is very punishing if spotted close. Intended pressure,
   but worth a human opinion.
+- **The recap map shows the entity walking through walls** at times. Outside the loaded chunks there
+  are no colliders, so its A* and movement ignore walls there (about 23% of its samples in one bot
+  run). That behaviour predates phase 8; the map just shows it. Freezing it outside loaded chunks
+  isn't safe as is: relocation can put it 68 m behind the player, which can itself be unloaded.
+- Hiding was tuned by simulation only. Not checked by a human: whether hold-to-hide (rather than a
+  toggle) feels right; whether the breathing is audible/scary; whether hiding in plain view at > 6 m
+  feels fair. The cupboard interior is lit by the room's lights (no shadows), so it isn't dark inside.
+- Photo mode gives no on-screen confirmation of a save (the HUD is hidden); only the browser's download
+  UI shows it.
+- The map shows at most the last 128 wall and 128 floor chalk marks (the chalk ring buffer).
