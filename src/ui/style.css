@@ -260,6 +260,27 @@ button {
   margin: 0;
 }
 
+.end-body {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 0 32px;
+}
+
+.end-map {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 20px 0;
+}
+
+.end-map canvas {
+  max-width: min(480px, 90vw);
+  max-height: 55vh;
+  border: 1px solid #6d5c32;
+}
+
 /* Settings */
 .settings-grid {
   display: grid;
@@ -316,6 +337,12 @@ button {
   text-align: center;
   background: #1a1709;
   border: 1px solid #6d5c32;
+}
+
+.end-panel {
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
 .radio-static {
