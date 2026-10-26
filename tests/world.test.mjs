@@ -3,7 +3,7 @@ import { CONFIG } from '../src/config.js';
 import { generateChunk, landmarkType } from '../src/world/chunkGen.js';
 import { ChunkManager } from '../src/world/chunkManager.js';
 import { CollisionWorld } from '../src/player/collision.js';
-import { panelGeometry, chairGeometry } from '../src/world/assets.js';
+import { panelGeometry, chairGeometry, hidingGeometries } from '../src/world/assets.js';
 
 const seed = 12345;
 const n = CONFIG.world.chunkCells;
@@ -71,7 +71,7 @@ console.log(`interior wall density: ${(100 * walls / (cache.size * 2 * (n - 1) *
 
 // 5. streaming + memory: walk 2 km in a straight line, count live geometries/instanced meshes
 const mat = new THREE.MeshBasicMaterial();
-const assets = { materials: { wall: mat, floor: mat, ceiling: mat, panel: mat, chair: mat, water: mat }, geometries: { panel: panelGeometry(), chair: chairGeometry() } };
+const assets = { materials: { wall: mat, floor: mat, ceiling: mat, panel: mat, chair: mat, water: mat, hiding: mat }, geometries: { panel: panelGeometry(), chair: chairGeometry(), ...hidingGeometries() } };
 const scene = new THREE.Scene();
 const cm = new ChunkManager(scene, seed, assets);
 let live = 0;

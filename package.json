@@ -10,9 +10,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/world.test.mjs && node tests/items.test.mjs",
+    "test": "node tests/world.test.mjs && node tests/items.test.mjs && node tests/recap.test.mjs && node tests/hiding.test.mjs",
     "test:world": "node tests/world.test.mjs",
-    "test:items": "node tests/items.test.mjs"
+    "test:items": "node tests/items.test.mjs",
+    "test:recap": "node tests/recap.test.mjs",
+    "test:hiding": "node tests/hiding.test.mjs"
   },
   "dependencies": {
     "three": "^0.186.0"

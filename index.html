@@ -23,7 +23,7 @@
         <p class="blink">pick a difficulty to enter</p>
         <button data-open-settings>settings</button>
         <p class="hint">
-          WASD move · Shift sprint · Mouse look · E interact · Q chalk · R drink · Tab checklist · Esc pause
+          WASD move · Shift sprint · Mouse look · E interact · C hide · Q chalk · R drink · Tab checklist · P photo · Esc pause
         </p>
       </div>
       <div class="panel" data-screen="paused">
@@ -129,7 +129,13 @@
       <div class="end-panel">
         <h1 class="end-result"></h1>
         <p class="end-reason"></p>
-        <dl class="end-stats"></dl>
+        <div class="end-body">
+          <dl class="end-stats"></dl>
+          <figure class="end-map">
+            <canvas id="end-map"></canvas>
+            <button data-save-map>save map (png)</button>
+          </figure>
+        </div>
         <div class="end-buttons">
           <button data-restart-same>Retry same seed</button>
           <button data-restart-new>New seed</button>

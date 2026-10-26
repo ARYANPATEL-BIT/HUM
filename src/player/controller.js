@@ -41,16 +41,19 @@ export class PlayerController {
     this.exhausted = false;
   }
 
-  update(dt) {
-    const pc = CONFIG.player;
+  // Mouse look only (photo mode and hiding use it on its own).
+  look() {
     const ic = CONFIG.input;
-    const input = this.input;
-
-    // --- look ---
-    const { dx, dy } = input.consumeMouse();
+    const { dx, dy } = this.input.consumeMouse();
     this.yaw -= dx * ic.mouseSensitivity;
     this.pitch -= dy * ic.mouseSensitivity * (ic.invertY ? -1 : 1);
     this.pitch = Math.max(-ic.pitchLimit, Math.min(ic.pitchLimit, this.pitch));
+  }
+
+  update(dt) {
+    const pc = CONFIG.player;
+    const input = this.input;
+    this.look();
 
     // --- move ---
     let f = 0;

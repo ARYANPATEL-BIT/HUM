@@ -116,6 +116,7 @@ export const CONFIG = {
     panelOn: 0xfff6dc,
     panelDead: 0x2a2820,
     chair: 0x2c2b2e,
+    furniture: 0x7a7360, // desks and cupboards
     water: 0x1f1a0b,
     waterOpacity: 0.8,
     mirrorDim: 0.55,
@@ -269,6 +270,29 @@ export const CONFIG = {
     size: 0.45,
     cooldown: 0.35,
   },
+
+  // Desks and cupboards (hold C). Sizes are [width, height, depth]; along = offset from the middle of the
+  // wall edge; eye/inset = camera height and its distance in front of the spot's centre while hidden.
+  hiding: {
+    chunkChance: 1 / 3,
+    perChunk: [1, 2],
+    reach: 1.3,           // from the spot's front point
+    desk: { size: [1.6, 0.75, 0.8], along: 0.9, eye: 0.5, inset: -0.2 },
+    cupboard: { size: [1.0, 2.0, 0.6], along: 1.1, eye: 1.55, inset: 0.1, slit: 0.08 },
+    spottedDist: 6,       // chasing and closer than this when you hide: it saw you
+    searchRadius: 3,      // its last sighting (or the noise it checks) is this close to you: it may look
+    searchChance: 0.35,   // chance it checks the spot where it lost you (tuned: ~50% of hides in tests/hiding.test.mjs)
+    catchDist: 1.5,       // catch distance to a found player (the spot's colliders keep it at ~0.7–1.1 m)
+    breathAfter: 20,      // seconds hidden before breathing gets loud and makes noise
+    breathRamp: 20,       // seconds from quiet to loudest
+    breathPeriod: [3.4, 2.0],
+    breathGain: [0.05, 0.35],
+    breathNoise: [4, 12], // noise radius per breath, m
+  },
+
+  // End-screen map: sample period (s), entity jumps longer than breakDist (m) between samples are gaps,
+  // longest side of the map in canvas pixels.
+  recap: { interval: 0.5, breakDist: 8, maxPx: 960 },
 
   entity: {
     spawnDelay: 45,       // seconds before the entity appears (hard: 0)

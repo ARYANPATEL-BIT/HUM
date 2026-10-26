@@ -10,7 +10,7 @@ import { hash, mulberry32, randInt, shuffle } from '../core/rng.js';
 // Lines 0 and n are chunk seams. Line 0 is built by this chunk, line n by the neighbour,
 // but both chunks compute both from the same edge hash so they always agree.
 
-const SALT = { CHUNK: 1, EDGE_H: 2, EDGE_V: 3, LANDMARK: 4 };
+const SALT = { CHUNK: 1, EDGE_H: 2, EDGE_V: 3, LANDMARK: 4, HIDING: 8 };
 const LANDMARK_TYPES = ['flooded', 'chairs', 'redLight', 'stairs'];
 export const CELL_NO_FLOOR = 1;
 export const CELL_TALL = 2;
@@ -150,7 +150,48 @@ export function generateChunk(seed, cx, cz) {
   }
   if (landmark?.type === 'redLight') applyRedLight(landmark.rect, panels, C);
 
-  return { seed, cx, cz, n, h, v, flags, pillars, panels, landmark, rooms };
+  const hiding = landmark ? [] : placeHidingSpots(mulberry32(hash(seed, SALT.HIDING, cx, cz)), rooms, n, C, h, v);
+
+  return { seed, cx, cz, n, h, v, flags, pillars, panels, landmark, rooms, hiding };
+}
+
+// Desks and cupboards: in ~1 of 3 chunks, 1–2 in one room, each in its own cell with its back to a wall
+// of that cell, shifted along the wall so the edge middle (keypad codes, A* checks) stays clear.
+// A spot = { type, x, z, yaw, hx, hz, fx, fz } in chunk meters: centre, facing (local +Z → (sin, cos)
+// of yaw), half extents of its box, and the point in front of it where the player stands.
+function placeHidingSpots(rng, rooms, n, C, h, v) {
+  const H = CONFIG.hiding;
+  if (rng() >= H.chunkChance) return [];
+  const room = rooms[Math.floor(rng() * rooms.length)];
+  const walls = []; // [gx, gz, nx, nz]: a wall of cell (gx, gz) whose normal (nx, nz) points into the cell
+  for (let z = room.z; z < room.z + room.h; z++) {
+    for (let x = room.x; x < room.x + room.w; x++) {
+      if (h[z * n + x]) walls.push([x, z, 0, 1]);
+      if (h[(z + 1) * n + x]) walls.push([x, z, 0, -1]);
+      if (v[x * n + z]) walls.push([x, z, 1, 0]);
+      if (v[(x + 1) * n + z]) walls.push([x, z, -1, 0]);
+    }
+  }
+  const count = randInt(rng, ...H.perChunk);
+  const used = new Set();
+  const spots = [];
+  for (const [gx, gz, nx, nz] of shuffle(rng, walls)) {
+    if (spots.length === count) break;
+    if (used.has(gz * n + gx)) continue;
+    used.add(gz * n + gx);
+    const type = rng() < 0.5 ? 'desk' : 'cupboard';
+    const [w, , d] = H[type].size;
+    const along = (rng() < 0.5 ? -1 : 1) * H[type].along;
+    const back = C / 2 - CONFIG.world.wallThickness / 2 - 0.02; // cell centre to the wall face
+    const x = (gx + 0.5) * C - nx * (back - d / 2) + nz * along;
+    const z = (gz + 0.5) * C - nz * (back - d / 2) + nx * along;
+    spots.push({
+      type, x, z, yaw: Math.atan2(nx, nz),
+      hx: nx ? d / 2 : w / 2, hz: nx ? w / 2 : d / 2,
+      fx: x + nx * (d / 2 + 0.45), fz: z + nz * (d / 2 + 0.45),
+    });
+  }
+  return spots;
 }
 
 function repairConnectivity(rng, n, flags, edgeBetween, neighbours) {
