@@ -72,6 +72,7 @@ export class Entity {
     this.loseTimer = 0;
     this.gracePeriod = 0;
     this.footstepTimer = 0;
+    this.lastSeen = new THREE.Vector3(); // player position at the last frame it had line of sight
     this.spawned = false;
     this.elapsed = 0;
   }
@@ -121,8 +122,11 @@ export class Entity {
     this.mesh.visible = false;
   }
 
-  update(dt, playerPos, playerCamera, pressure, noiseEvents) {
+  // hiding: the player's Hiding state (or null). A hidden player is invisible to it unless hiding.found.
+  update(dt, playerPos, playerCamera, pressure, noiseEvents, hiding = null) {
     if (!this.enabled) return;
+    const H = CONFIG.hiding;
+    const hidden = hiding?.active && !hiding.found;
     this.elapsed += dt;
     this.material.uniforms.time.value = this.elapsed;
 
@@ -138,8 +142,9 @@ export class Entity {
       if (this.gracePeriod < 0) this.gracePeriod = 0;
     }
 
-    // LoS check.
-    const hasLos = this._hasLoS(playerPos);
+    // LoS check. A found hiding player counts as seen (the spot's own box would block the ray).
+    const hasLos = hiding?.active ? hiding.found : this._hasLoS(playerPos);
+    if (hasLos) this.lastSeen.copy(playerPos);
 
     // State machine.
     switch (this.state) {
@@ -151,6 +156,8 @@ export class Entity {
         }
         break;
       case STATES.INVESTIGATE:
+        // Checking a noise right next to someone who has been hiding long enough to breathe loudly.
+        if (hidden && hiding.breathing && this.position.distanceTo(playerPos) < H.searchRadius) hiding.found = true;
         this._investigate(dt);
         if (hasLos && this.gracePeriod <= 0) {
           const d = this.position.distanceTo(playerPos);
@@ -158,15 +165,21 @@ export class Entity {
         }
         break;
       case STATES.CHASE:
-        this._follow(dt, playerPos, CONFIG.entity.chaseSpeed * (1 + pressure * (CONFIG.entity.rampSpeedMax - 1)));
+        // Normally it tracks you for loseDist s after losing sight; if you hid, only to where it last saw you.
+        this._follow(dt, hidden ? this.lastSeen : playerPos, CONFIG.entity.chaseSpeed * (1 + pressure * (CONFIG.entity.rampSpeedMax - 1)));
         if (!hasLos) {
           this.loseTimer += dt;
           if (this.loseTimer > CONFIG.entity.loseDist) this._setState(STATES.LOSE);
         } else {
           this.loseTimer = 0;
         }
+        if (hidden && this.state === STATES.CHASE && this.position.distanceTo(this.lastSeen) < 1.5) {
+          // There: check the hiding place next to it, or give up.
+          if (this.position.distanceTo(playerPos) < H.searchRadius && Math.random() < H.searchChance) hiding.found = true;
+          else this._setState(STATES.LOSE);
+        }
         // Caught?
-        if (this.position.distanceTo(playerPos) < CONFIG.entity.caughtDist) {
+        if (!hidden && this.position.distanceTo(playerPos) < (hiding?.active ? H.catchDist : CONFIG.entity.caughtDist)) {
           document.dispatchEvent(new CustomEvent('entity-caught'));
         }
         break;
@@ -361,6 +374,8 @@ export class Entity {
     this.mesh.position.copy(this.position);
     if (this.target) { this.target.x -= dx; this.target.z -= dz; }
     if (this.noiseTarget) { this.noiseTarget.x -= dx; this.noiseTarget.z -= dz; }
+    this.lastSeen.x -= dx;
+    this.lastSeen.z -= dz;
     for (const p of this.path) { p.x -= dx; p.z -= dz; }
     rebaseEntityAudio(dx, dz);
   }
